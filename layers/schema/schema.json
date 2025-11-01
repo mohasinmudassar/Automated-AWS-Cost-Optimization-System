@@ -1,0 +1,89 @@
+{
+  "EC2": {
+    "Metrics": {
+      "instance": {
+        "NET_IN": {
+          "Metric_ID": "net_in",
+          "Metric_Namespace": "AWS/EC2",
+          "Metric_Name": "NetworkIn",
+          "Stat": "Maximum",
+          "Unit": "Bytes"
+        },
+        "NET_OUT": {
+          "Metric_ID": "net_out",
+          "Metric_Namespace": "AWS/EC2",
+          "Metric_Name": "NetworkOut",
+          "Stat": "Maximum",
+          "Unit": "Bytes"
+        },
+        "CPU": {
+          "Metric_ID": "cpu",
+          "Metric_Namespace": "AWS/EC2",
+          "Metric_Name": "CPUUtilization",
+          "Stat": "Maximum",
+          "Unit": "Percent"
+        }
+      }
+    }
+  },
+  "LB": {
+    "Metrics": {
+      "application": {
+        "REQUESTS": {
+          "Metric_ID": "req",
+          "Metric_Namespace": "AWS/ApplicationELB",
+          "Metric_Name": "RequestCount",
+          "Stat": "Sum",
+          "Unit": "Count"
+        },
+        "LCU": {
+          "Metric_ID": "lcu",
+          "Metric_Namespace": "AWS/ApplicationELB",
+          "Metric_Name": "ConsumedLCUs",
+          "Stat": "Sum",
+          "Unit": "Count"
+        }
+      },
+      "network": {
+        "NEW_FLOW": {
+          "Metric_ID": "new_flow",
+          "Metric_Namespace": "AWS/NetworkELB",
+          "Metric_Name": "NewFlowCount",
+          "Stat": "Sum",
+          "Unit": "Count"
+        }
+      },
+      "classic": {
+        "REQUESTS": {
+          "Metric_ID": "req",
+          "Metric_Namespace": "AWS/ELB",
+          "Metric_Name": "RequestCount",
+          "Stat": "Sum",
+          "Unit": "Count"
+        }
+      },
+      "gateway": {
+        "NEW_FLOW": {
+          "Metric_ID": "new_flow",
+          "Metric_Namespace": "AWS/GatewayELB",
+          "Metric_Name": "NewFlowCount",
+          "Stat": "Sum",
+          "Unit": "Count"
+        }
+      }
+    }
+  },
+  "GW": {
+    "Metrics": {
+      "nat_gw": {
+        "LCU": {
+          "Metric_ID": "lcu",
+          "Metric_Namespace": "AWS/NATGateway",
+          "Metric_Name": "ActiveConnectionCount",
+          "Stat": "Maximum",
+          "Unit": "Count"
+        }
+      }
+    }
+  }
+}
