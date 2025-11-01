@@ -7,7 +7,6 @@ from schema import import_Schema
 from botocore.exceptions import ClientError
 
 # Logging
-
 logger = logging.getLogger()
 if len(logger.handlers) > 0:
     logger.setLevel(logging.INFO)
@@ -18,7 +17,6 @@ else:
 spacer = "_" * 100
 
 default_region = os.getenv("AWS_REGION", "us-east-1")
-
 # Create DynamoDB resource
 dynamodb = boto3.client("dynamodb", region_name=default_region)
 # Create DynamoDB table if it doesn't exist
