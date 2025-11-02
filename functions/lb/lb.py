@@ -14,7 +14,8 @@ logger = logging.getLogger()
 if len(logging.getLogger().handlers) > 0:
     logger.setLevel(logging.INFO)
 else:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(levelname)s: %(message)s')
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s: %(levelname)s: %(message)s')
 
 
 # ---------------------------------------------------------------------
@@ -22,16 +23,16 @@ else:
 # ---------------------------------------------------------------------
 spacer = "_" * 100
 
-TIME_FRAME = 7                     # ❗ Hardcoded: Number of days to check for inactivity
-PERIOD = 86400 * TIME_FRAME        # Metric period (seconds) — derived from TIME_FRAME
-default_region = 'ap-southeast-1'  # ❗ Hardcoded: AWS region used for all API clients
+TIME_FRAME = 7                  
+# Metric period (seconds) — derived from TIME_FRAME
+PERIOD = 86400 * TIME_FRAME
+default_region = 'AWS_REGION, ap-southeast-1'
 
 # ---------------------------------------------------------------------
 # DynamoDB SETUP
 # ---------------------------------------------------------------------
-# ❗ Hardcoded: DynamoDB table name and throughput config
 dynamodb = boto3.client('dynamodb', region_name=default_region)
-table_name = 'StaleResourcesTesting'  # ❗ Hardcoded table name
+table_name = 'StaleResourcesTesting' 
 
 key_schema = [
     {'AttributeName': 'ResourceID', 'KeyType': 'HASH'},
@@ -42,8 +43,8 @@ attribute_definitions = [
     {'AttributeName': 'Type', 'AttributeType': 'S'}
 ]
 provisioned_throughput = {
-    'ReadCapacityUnits': 5,   # ❗ Hardcoded read capacity
-    'WriteCapacityUnits': 5   # ❗ Hardcoded write capacity
+    'ReadCapacityUnits': 5,   
+    'WriteCapacityUnits': 5  
 }
 
 # Create table if missing
@@ -82,7 +83,8 @@ def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id)
     for event in events:
         # Looks specifically for 'CreateLoadBalancer' event to find the user
         if event['EventName'] == "CreateLoadBalancer":
-            user_identity = json.loads(event['CloudTrailEvent'])['userIdentity']
+            user_identity = json.loads(event['CloudTrailEvent'])[
+                'userIdentity']
             if user_identity.get('type') == 'AssumedRole':
                 creator_user = event["Username"]
                 return creator_user
@@ -93,7 +95,8 @@ def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id)
 # Function: Pull CloudWatch metrics for a Load Balancer
 # ---------------------------------------------------------------------
 def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, lb_resource_id, start_time, end_time):
-    details = import_schema.get_data(resource_type_major)['Metrics'][resource_type_minor]
+    details = import_schema.get_data(resource_type_major)[
+        'Metrics'][resource_type_minor]
     query = {}
     metric_data_queries = []
     for key, _ in details.items():
@@ -110,7 +113,8 @@ def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, lb_
                         },
                     ]
                 },
-                "Period": PERIOD,        # Uses global hardcoded PERIOD (7 days * 86400)
+                # Uses global hardcoded PERIOD (7 days * 86400)
+                "Period": PERIOD,
                 "Stat": details[key]["Stat"],
                 "Unit": details[key]["Unit"]
             },
@@ -145,7 +149,8 @@ def main_handler(event, context):
     # Step 1: List all AWS regions
     # -----------------------------------------------------------------
     ec2_client = boto3.client('ec2', region_name=default_region)
-    regions = [region['RegionName'] for region in ec2_client.describe_regions()['Regions']]
+    regions = [region['RegionName']
+               for region in ec2_client.describe_regions()['Regions']]
 
     # -----------------------------------------------------------------
     # Step 2: Loop through all regions to analyze LBs
@@ -162,32 +167,38 @@ def main_handler(event, context):
                 lb_creation_time = load_balancer['CreatedTime']
 
                 # Compute LB age
-                lb_age = datetime.now(lb_creation_time.tzinfo) - lb_creation_time
+                lb_age = datetime.now(
+                    lb_creation_time.tzinfo) - lb_creation_time
                 lb_age_days = lb_age.days
 
-                lb_resource_id = load_balancer["LoadBalancerArn"].split("/", maxsplit=1)[1]
+                lb_resource_id = load_balancer["LoadBalancerArn"].split(
+                    "/", maxsplit=1)[1]
 
                 # -----------------------------------------------------------------
                 # Step 3: Get Target Groups (listeners) for the LB
                 # -----------------------------------------------------------------
-                target_groups = client.describe_target_groups(LoadBalancerArn=load_balancer["LoadBalancerArn"])
-                listeners = [tg["TargetGroupName"] for tg in target_groups["TargetGroups"]]
+                target_groups = client.describe_target_groups(
+                    LoadBalancerArn=load_balancer["LoadBalancerArn"])
+                listeners = [tg["TargetGroupName"]
+                             for tg in target_groups["TargetGroups"]]
 
                 # -----------------------------------------------------------------
                 # Step 4: Find creator tag or fallback to CloudTrail
                 # -----------------------------------------------------------------
-                tags = client.describe_tags(ResourceArns=[load_balancer["LoadBalancerArn"]])
+                tags = client.describe_tags(
+                    ResourceArns=[load_balancer["LoadBalancerArn"]])
                 creator = None
                 tag_dicts = tags['TagDescriptions'][0]['Tags']
                 for x in tag_dicts:
-                    if any('creator' == v for v in x.values()):  # ❗ Hardcoded tag key 'creator'
+                    if any('creator' == v for v in x.values()):
                         creator = x['Value']
                 if creator:
                     if creator not in email_candidates:
                         email_candidates[creator] = []
                 else:
                     # fallback via CloudTrail lookup
-                    creator = get_creator_from_cloudtrail_ec2(lb_creation_time, region, load_balancer["LoadBalancerArn"])
+                    creator = get_creator_from_cloudtrail_ec2(
+                        lb_creation_time, region, load_balancer["LoadBalancerArn"])
                     if creator not in email_candidates:
                         email_candidates[creator] = []
 
@@ -198,36 +209,47 @@ def main_handler(event, context):
                     if listeners:
                         end_time = datetime.now()
                         start_time = end_time - timedelta(days=TIME_FRAME)
-                        response = get_metrics(cloudwatch_client, resource_type_major, lb_type, lb_resource_id, start_time, end_time)
+                        response = get_metrics(
+                            cloudwatch_client, resource_type_major, lb_type, lb_resource_id, start_time, end_time)
 
-                        # ❗ Assumes schema index 1 corresponds to RequestCount metric
+          
                         request_count_list = response['MetricDataResults'][1]['Values']
 
                         if request_count_list:
                             request_count = response['MetricDataResults'][1]['Values'][0]
 
-                            # ❗ Hardcoded threshold: 1000 requests in last 7 days
+                          
                             if request_count > 1000:
                                 status = "Not stale"
-                                logger.info(f"Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, Requests: {request_count}")
+                                logger.info(
+                                    f"Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, Requests: {request_count}")
                             else:
                                 status = "stale"
-                                email_candidates[creator].append((lb_name, lb_resource_id, region, "idle", lb_type, resource_type_major))
-                                logger.info(f"Stale LB Detected: Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, Requests: {request_count}")
+                                email_candidates[creator].append(
+                                    (lb_name, lb_resource_id, region, "idle", lb_type, resource_type_major))
+                                logger.info(
+                                    f"Stale LB Detected: Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, Requests: {request_count}")
 
-                            info_candidates.append((lb_name, lb_type, lb_age, region, creator, listeners, request_count_list, status))
+                            info_candidates.append(
+                                (lb_name, lb_type, lb_age, region, creator, listeners, request_count_list, status))
                         else:
                             # No metric data → consider stale
-                            email_candidates[creator].append((lb_name, lb_resource_id, region, "idle", lb_type, resource_type_major))
-                            logger.info(f"Stale LB Detected: Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, No Request Count")
-                            info_candidates.append((lb_name, lb_type, lb_age, region, creator, listeners, "No Values Returned", "stale"))
+                            email_candidates[creator].append(
+                                (lb_name, lb_resource_id, region, "idle", lb_type, resource_type_major))
+                            logger.info(
+                                f"Stale LB Detected: Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, No Request Count")
+                            info_candidates.append(
+                                (lb_name, lb_type, lb_age, region, creator, listeners, "No Values Returned", "stale"))
                     else:
                         # LBs without listeners are misconfigured
-                        info_candidates.append((lb_name, lb_type, lb_age, region, creator, listeners, "No Listeners Attached", "misconfigured"))
-                        email_candidates[creator].append((lb_name, lb_resource_id, region, "misconfigured", lb_type, resource_type_major))
+                        info_candidates.append(
+                            (lb_name, lb_type, lb_age, region, creator, listeners, "No Listeners Attached", "misconfigured"))
+                        email_candidates[creator].append(
+                            (lb_name, lb_resource_id, region, "misconfigured", lb_type, resource_type_major))
                 else:
                     # Skip young resources
-                    info_candidates.append((lb_name, lb_type, lb_age, region, creator, listeners, f"Resource Age less than {TIME_FRAME} days", "None"))
+                    info_candidates.append((lb_name, lb_type, lb_age, region, creator,
+                                           listeners, f"Resource Age less than {TIME_FRAME} days", "None"))
 
     # -----------------------------------------------------------------
     # Step 6: Publish overall results to SNS
@@ -243,9 +265,8 @@ def main_handler(event, context):
             f"\nStatus: {resource[7]}"
         )
     try:
-        # ❗ Hardcoded SNS Topic ARN
         sns_client.publish(
-            TopicArn='arn:aws:sns:ap-southeast-1:737457451118:stale-resource-info',
+            TopicArn='arn:stale-resource-info',
             Message=BODY_TEXT,
             Subject='Info',
         )
@@ -266,7 +287,6 @@ def main_handler(event, context):
                         instruction = "configure it properly or delete it if you don't need it"
                     try:
                         lb_resource_id = resource[1].split('/')[2]
-                        # ❗ Hardcoded table name again
                         dynamodb.put_item(
                             TableName=table_name,
                             Item={
@@ -277,7 +297,8 @@ def main_handler(event, context):
                                 'Deletion_Status': {'S': "Marked"},
                             }
                         )
-                        logger.info(f"Stored stale LB ({lb_resource_id}, {resource[2]}, {resource[3]}) in DynamoDB")
+                        logger.info(
+                            f"Stored stale LB ({lb_resource_id}, {resource[2]}, {resource[3]}) in DynamoDB")
                     except ClientError as e:
                         logger.exception(f"Error storing LB in DynamoDB: {e}")
 
@@ -287,8 +308,7 @@ def main_handler(event, context):
                         f"\nPlease {instruction} or it will be automatically deleted"
                     )
 
-                # ❗ Hardcoded sender email address below
-                SENDER = "xmops@xgrid.co"
+                SENDER = "sender@gmail.com"
                 RECIPIENT = creator
                 SUBJECT = "Stale resource identified"
                 CHARSET = "UTF-8"
