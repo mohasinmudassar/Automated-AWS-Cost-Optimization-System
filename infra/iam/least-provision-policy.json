@@ -24,6 +24,49 @@
                 "cloudwatch:GetMetricData"
             ],
             "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+            "cloudtrail:LookupEvents"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:DescribeTable"
+            ],
+            "Resource": "arn:aws:dynamodb:*:*:table/${aws:ResourceTag/Project}-stale-resources"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "events:PutRule",
+                "events:PutTargets",
+                "events:DescribeRule",
+                "events:ListTargetsByRule",
+                "events:PutPermission"
+            ],
+            "Resource": "arn:aws:events:*:*:rule/idle-ec2-*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "lambda:InvokeFunction",
+                "lambda:AddPermission",
+                "lambda:GetFunction"
+            ],
+            "Resource": "${env:DELETER_FN_ARN}"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "${SNS_TOPIC_ARN}"
         }
     ]
 }
