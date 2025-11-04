@@ -67,6 +67,14 @@
                 "sns:Publish"
             ],
             "Resource": "${SNS_TOPIC_ARN}"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ses:SendEmail",
+                "ses:SendRawEmail"
+            ],
+            "Resource": "*"
         }
     ]
 }
