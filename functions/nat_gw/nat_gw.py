@@ -7,7 +7,10 @@ from schema import import_schema
 import boto3
 from botocore.exceptions import ClientError
 
-
+# ---------------------------------------------------------------------
+# LOGGING CONFIGURATION
+# ---------------------------------------------------------------------
+# Ensures that all log messages are shown in CloudWatch with timestamp and level.
 logger = logging.getLogger()
 if len(logging.getLogger().handlers) > 0:
     logger.setLevel(logging.INFO)
@@ -16,6 +19,9 @@ else:
                         format='%(asctime)s: %(levelname)s: %(message)s')
 
 
+# ---------------------------------------------------------------------
+# GLOBAL CONFIGURATION
+# ---------------------------------------------------------------------
 spacer = "_" * 100
 
 
@@ -26,6 +32,9 @@ PERIOD = 86400 * TIME_FRAME  # Convert days to seconds
 default_region = 'AWS_REGION, ap-southeast-1'
 
 
+# ---------------------------------------------------------------------
+# DYNAMODB SETUP
+# ---------------------------------------------------------------------
 # Connect to DynamoDB
 dynamodb = boto3.client('dynamodb', region_name=default_region)
 
@@ -61,6 +70,10 @@ except ClientError as e:
         raise
 
 
+# ---------------------------------------------------------------------
+# FUNCTION: get_creator_from_cloudtrail_ec2
+# ---------------------------------------------------------------------
+# Finds the creator of a NAT Gateway by scanning CloudTrail events.
 def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id):
     cloudtrail_client = boto3.client('cloudtrail', region_name=region)
 
@@ -88,6 +101,9 @@ def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id)
     return None
 
 
+# ---------------------------------------------------------------------
+# FUNCTION: get_metrics
+# ---------------------------------------------------------------------
 # Fetches NAT Gateway CloudWatch metrics such as connection attempts.
 def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, gw_resource_id, start_time, end_time):
     details = import_schema.get_data(resource_type_major)[
@@ -124,6 +140,9 @@ def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, gw_
     return response
 
 
+# ---------------------------------------------------------------------
+# MAIN HANDLER (Lambda entry point)
+# ---------------------------------------------------------------------
 def main_handler(event, context):
     """
     Main workflow:
@@ -141,6 +160,9 @@ def main_handler(event, context):
     resource_type_major = event['major']
     resource_type_minor = event['minor']
 
+    # -----------------------------------------------------------------
+    # Step 1: Retrieve all AWS regions
+    # -----------------------------------------------------------------
     ec2_client = boto3.client('ec2', region_name=default_region)
     regions = [region['RegionName']
                for region in ec2_client.describe_regions()['Regions']]
@@ -149,6 +171,9 @@ def main_handler(event, context):
         cloudwatch_client = boto3.client("cloudwatch", region_name=region)
         ec2 = boto3.client('ec2', region_name=region)
 
+        # -----------------------------------------------------------------
+        # Step 2: Fetch all NAT Gateways in the region
+        # -----------------------------------------------------------------
         response = ec2.describe_nat_gateways()
 
         for nat_gateway in response['NatGateways']:
@@ -179,6 +204,9 @@ def main_handler(event, context):
                     nat_gateway_creation_time, region, nat_gateway_id)
                 email_candidates.setdefault(creator, [])
 
+            # -----------------------------------------------------------------
+            # Step 3: Identify stale NAT Gateways based on metrics
+            # -----------------------------------------------------------------
             if nat_gateway_age_days >= TIME_FRAME:
                 end_time = datetime.now()
                 start_time = end_time - timedelta(days=TIME_FRAME)
@@ -214,6 +242,9 @@ def main_handler(event, context):
                 info_candidates.append((nat_gateway_id, nat_gateway_age, region, creator,
                                         f"Resource Age less than {TIME_FRAME} days", "None"))
 
+    # -----------------------------------------------------------------
+    # Step 4: Publish summary report to SNS
+    # -----------------------------------------------------------------
     BODY_TEXT = ""
     sns_client = boto3.client('sns', region_name=default_region)
     for resource in info_candidates:
@@ -230,6 +261,9 @@ def main_handler(event, context):
     except ClientError:
         logger.exception('Could not publish message to the topic.')
 
+    # -----------------------------------------------------------------
+    # Step 5: Store stale NAT Gateways and notify owners via SES
+    # -----------------------------------------------------------------
     for creator, idle_resources in email_candidates.items():
         if creator:
             BODY_TEXT = ""
