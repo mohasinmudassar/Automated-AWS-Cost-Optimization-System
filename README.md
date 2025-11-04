@@ -34,7 +34,7 @@ It identifies idle assets using **CloudWatch metrics**, determines ownership usi
 
 Below is the system’s AWS architecture showing how the components interact end-to-end:
 
-![AWS Idle Resource Auditor Architecture](Architecture.png)
+![AWS Idle Resource Auditor Architecture](Architecture_Diagram.png)
 
 ## 🧱 Core Components
 
