@@ -1,4 +1,4 @@
-# 🧭 AWS Idle Resource Auditor (EC2 / LB / NAT Gateway)
+# 🧭 Automated AWS Cost Optimization System (EC2 / LB / NAT Gateway)
 
 > Automated detection, tracking, and cleanup of idle AWS resources.  
 > Designed for cost optimization, visibility, and operational efficiency.
