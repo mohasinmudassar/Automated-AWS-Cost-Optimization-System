@@ -60,7 +60,6 @@ Below is the system’s AWS architecture showing how the components interact end
 | **SNS** | Sends summaries to Ops / FinOps team. |
 | **SES** | Notifies resource owners directly. |
 | **EventBridge** | Schedules auto-deletion events. |
-| **Deletion Lambda** | Cleans up stale resources automatically. |
 | **Lambda Layers** | Provide shared schema + dependency packages. |
 
 ---
@@ -106,15 +105,14 @@ Metrics tracked for each resource type, with statistics and units:
 
 ### 5️⃣ **Auto-Deletion (Optional)**
 - EventBridge schedules cleanup after `N` minutes.
-- Deletion Lambda removes resources not tagged as `stale=false`.
 
 ---
 
 ## 🪜 Deployment Guide
 
 1. **Create Lambda Layers**
-   - `/lambdas/layers/packages` → `boto3`, etc.
-   - `/lambdas/layers/schema` → Metric definitions.
+   - `layers/packages` → `boto3`, etc.
+   - `layers/schema` → Metric definitions.
 
 2. **Deploy Auditor Lambdas**
    - EC2, LB, and NAT GW functions.
@@ -130,7 +128,6 @@ Metrics tracked for each resource type, with statistics and units:
    - Create and subscribe to SNS topic.
 
 5. **Configure EventBridge**
-   - Triggers deletion Lambda after 7 days.
 
 6. **Set Environment Variables**
    - Configure region, table, thresholds, topic ARN.

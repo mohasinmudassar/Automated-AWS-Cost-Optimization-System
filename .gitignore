@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+
+# Terraform (state and local override files can contain secrets)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!terraform.tfvars.example
+
+# Packaged Lambda artifacts
+*.zip
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
