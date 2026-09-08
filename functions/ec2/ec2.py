@@ -1,9 +1,8 @@
-import os
 import sys
 import json
 import logging
 from datetime import datetime, timedelta
-from schema import import_schema
+from schema import config, import_schema
 import boto3
 from botocore.exceptions import ClientError
 
@@ -23,100 +22,14 @@ else:
 # GLOBAL CONFIGURATION / HARDCODED VARIABLES
 # ---------------------------------------------------------------------
 spacer = "_" * 100
-default_region = 'AWS_REGION, ap-southeast-1'
+default_region = config.AWS_REGION
 
 # ---------------------------------------------------------------------
 # DYNAMODB SETUP
 # ---------------------------------------------------------------------
 dynamodb = boto3.client('dynamodb', region_name=default_region)
 
-table_name = 'StaleResourcesTesting'
-
-# Define table schema and throughput (hardcoded)
-key_schema = [
-    {'AttributeName': 'ResourceID', 'KeyType': 'HASH'},
-    {'AttributeName': 'Type', 'KeyType': 'RANGE'}
-]
-attribute_definitions = [
-    {'AttributeName': 'ResourceID', 'AttributeType': 'S'},
-    {'AttributeName': 'Type', 'AttributeType': 'S'}
-]
-provisioned_throughput = {
-    'ReadCapacityUnits': 5,
-    'WriteCapacityUnits': 5
-}
-
-# Attempt to create DynamoDB table if it doesn't exist
-try:
-    dynamodb.create_table(
-        TableName=table_name,
-        KeySchema=key_schema,
-        AttributeDefinitions=attribute_definitions,
-        ProvisionedThroughput=provisioned_throughput
-    )
-except ClientError as e:
-    if e.response['Error']['Code'] == 'ResourceInUseException':
-        logger.info(f"Table {table_name} already exists.")
-    else:
-        raise
-
-
-# ---------------------------------------------------------------------
-# FUNCTION: schedule_deletion_lambda
-# ---------------------------------------------------------------------
-# This function schedules another Lambda (deletion lambda) via EventBridge
-# to run automatically at a future time (here ~7 days later).
-def schedule_deletion_lambda(resource_type, table_name, function_name, function_arn, rule_name):
-    lambda_client = boto3.client('lambda', region_name=default_region)
-    eventbridge = boto3.client('events', region_name=default_region)
-
-    # Schedule deletion ~7 days later (10050 minutes)
-    current_time = datetime.utcnow()
-    scheduled_time = current_time + timedelta(minutes=10050)
-
-    # IAM permission and rule config
-    statement_id = 'event'
-    action = 'lambda:InvokeFunction'
-    principal = 'events.amazonaws.com'
-    input_data = {
-        "table_name": table_name,
-        "type": resource_type
-    }
-
-    try:
-        # Create EventBridge rule with a cron expression for scheduled execution
-        eventbridge.put_rule(
-            Name=rule_name,
-            ScheduleExpression=f'cron({scheduled_time.minute} {scheduled_time.hour} {scheduled_time.day} {scheduled_time.month} ? {scheduled_time.year})',
-            State='ENABLED'
-        )
-
-        # Attach deletion lambda as the rule target
-        eventbridge.put_targets(
-            Rule=rule_name,
-            Targets=[
-                {
-                    'Id': function_name,
-                    'Arn': function_arn,
-                    'Input': json.dumps(input_data)
-                }
-            ]
-        )
-
-        # Grant EventBridge permission to invoke the lambda
-        response = eventbridge.describe_rule(Name=rule_name)
-        source_arn = response['Arn']
-        lambda_client.add_permission(
-            FunctionName=function_name,
-            StatementId=statement_id,
-            Action=action,
-            Principal=principal,
-            SourceArn=source_arn
-        )
-        return scheduled_time.strftime("%d-%m-%Y, %H:%M:%S")
-    except Exception as e:
-        logger.exception(f"Error while scheduling deletion lambda: {e}")
-        return False
+table_name = config.TABLE_NAME
 
 
 # ---------------------------------------------------------------------
@@ -200,7 +113,6 @@ def main_handler(event, context):
         - Decide stale / active
     3. Store stale resources in DynamoDB
     4. Notify owners via SES and summary via SNS
-    5. Schedule deletion Lambda
     """
 
     # Initialize state tracking
@@ -210,9 +122,6 @@ def main_handler(event, context):
     # Extract parameters from event
     resource_type_major = event['major']
     resource_type_minor = event['minor']
-    deletion_lambda_name = event['deletion_lambda_name']
-    deletion_lambda_arn = event['deletion_lambda_arn']
-    deletion_lambda_rule_name = event['deletion_lambda_rule_name']
     TIME_FRAME = event['time_frame']  # days
     PERIOD = 86400 * TIME_FRAME       # seconds
 
@@ -292,7 +201,7 @@ def main_handler(event, context):
                         network_out_data = network_out_data[0] if network_out_data else 0
                         cpu_utilization_data = cpu_utilization_data[0] if cpu_utilization_data else 0
 
-                        if (network_in_data < 5 * 1024 * 1024 and network_out_data < 5 * 1024 * 1024) or cpu_utilization_data < 10:
+                        if (network_in_data < config.NETWORK_THRESHOLD_BYTES and network_out_data < config.NETWORK_THRESHOLD_BYTES) or cpu_utilization_data < config.CPU_THRESHOLD_PERCENT:
                             status = "stale"
                             email_candidates[creator].append(
                                 (instance_id, region, resource_type_major))
@@ -332,7 +241,7 @@ def main_handler(event, context):
                       f"\n{spacer}")
     try:
         sns_client.publish(
-            TopicArn=os.environ["SNS_TOPIC_ARN"],
+            TopicArn=config.SNS_TOPIC_ARN,
             Message=BODY_TEXT,
             Subject='Info',
         )
@@ -365,10 +274,10 @@ def main_handler(event, context):
                 # Prepare email content
                 BODY_TEXT += (f"\n--> EC2 instance: {resource[0]}, Owner: {creator} Region: {resource[1]}"
                               "\n identified as a stale resource"
-                              "\n Delete it if not needed; it will be automatically deleted after 7 days."
+                              "\n Delete it if not needed."
                               "\n If still needed, tag it with: Key='Stale', Value='false'")
 
-            SENDER = "sender@gmail.com"
+            SENDER = config.SES_SENDER
             RECIPIENT = creator
             SUBJECT = "Stale resource identified"
             CHARSET = "UTF-8"
@@ -385,20 +294,3 @@ def main_handler(event, context):
                 )
             except ClientError as e:
                 logger.exception(e.response['Error']['Message'])
-
-    # -----------------------------------------------------------------
-    # Step 7: Schedule automatic deletion Lambda via EventBridge
-    # -----------------------------------------------------------------
-    response = schedule_deletion_lambda(resource_type_major, table_name, deletion_lambda_name,
-                                        deletion_lambda_arn, deletion_lambda_rule_name)
-    BODY_TEXT = ("Unable to schedule deletion lambda" if not response
-                 else f"Deletion lambda for {resource_type_major} scheduled at {response} (UTC Time)")
-
-    try:
-        sns_client.publish(
-            TopicArn='arn:stale-resource-info',
-            Message=BODY_TEXT,
-            Subject='Info',
-        )
-    except ClientError:
-        logger.exception('Could not publish message to the topic.')

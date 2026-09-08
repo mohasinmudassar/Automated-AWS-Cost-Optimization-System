@@ -1,9 +1,8 @@
-import os
 import sys
 import json
 import logging
 from datetime import datetime, timedelta
-from schema import import_schema
+from schema import config, import_schema
 import boto3
 from botocore.exceptions import ClientError
 
@@ -29,7 +28,7 @@ TIME_FRAME = 7
 PERIOD = 86400 * TIME_FRAME  # Convert days to seconds
 
 
-default_region = 'AWS_REGION, ap-southeast-1'
+default_region = config.AWS_REGION
 
 
 # ---------------------------------------------------------------------
@@ -38,36 +37,7 @@ default_region = 'AWS_REGION, ap-southeast-1'
 # Connect to DynamoDB
 dynamodb = boto3.client('dynamodb', region_name=default_region)
 
-table_name = 'StaleResourcesTesting'
-
-# Define DynamoDB schema
-key_schema = [
-    {'AttributeName': 'ResourceID', 'KeyType': 'HASH'},
-    {'AttributeName': 'Type', 'KeyType': 'RANGE'}
-]
-attribute_definitions = [
-    {'AttributeName': 'ResourceID', 'AttributeType': 'S'},
-    {'AttributeName': 'Type', 'AttributeType': 'S'}
-]
-
-provisioned_throughput = {
-    'ReadCapacityUnits': 5,
-    'WriteCapacityUnits': 5
-}
-
-# Create DynamoDB table if it does not exist
-try:
-    dynamodb.create_table(
-        TableName=table_name,
-        KeySchema=key_schema,
-        AttributeDefinitions=attribute_definitions,
-        ProvisionedThroughput=provisioned_throughput
-    )
-except ClientError as e:
-    if e.response['Error']['Code'] == 'ResourceInUseException':
-        logger.info(f"Table {table_name} already exists.")
-    else:
-        raise
+table_name = config.TABLE_NAME
 
 
 # ---------------------------------------------------------------------
@@ -216,7 +186,7 @@ def main_handler(event, context):
                 if response['MetricDataResults'][0]['Values']:
                     connection_attempts = response['MetricDataResults'][0]['Values'][0]
 
-                    if connection_attempts > 7:
+                    if connection_attempts > config.NAT_GW_CONNECTION_THRESHOLD:
                         status = "Not stale"
                         logger.info(
                             f"NAT Gateway: {nat_gateway_id}, Region: {region}, Owner: {creator}, Connection Attempt Count: {connection_attempts}")
@@ -254,7 +224,7 @@ def main_handler(event, context):
                       f"\nStatus: {resource[5]}")
     try:
         sns_client.publish(
-            TopicArn='arn:stale-resource-info',
+            TopicArn=config.SNS_TOPIC_ARN,
             Message=BODY_TEXT,
             Subject='Info',
         )
@@ -289,9 +259,9 @@ def main_handler(event, context):
                 # Prepare email body for notification
                 BODY_TEXT += (f"\n--> NAT Gateway: {resource[0]}, Owner: {creator}, Region: {resource[1]}"
                               "\n has been identified as a stale resource."
-                              "\n Please delete it if not needed or it will be automatically deleted soon.")
+                              "\n Please delete it if not needed.")
 
-            SENDER = "creator@gmail.com"
+            SENDER = config.SES_SENDER
             RECIPIENT = creator
             SUBJECT = "Stale resource identified"
             CHARSET = "UTF-8"
