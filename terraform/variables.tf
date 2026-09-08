@@ -28,13 +28,13 @@ variable "table_name" {
   type        = string
 }
 
-variable "sns_topic_arn" {
-  description = "SNS topic the ops/FinOps summary is published to."
+variable "ses_sender" {
+  description = "Verified SES sender address owner notifications are sent from."
   type        = string
 }
 
-variable "ses_sender" {
-  description = "Verified SES sender address owner notifications are sent from."
+variable "ops_notification_email" {
+  description = "Ops/FinOps email address subscribed to the SNS summary topic."
   type        = string
 }
 

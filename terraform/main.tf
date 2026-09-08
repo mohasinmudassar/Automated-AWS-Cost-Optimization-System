@@ -146,7 +146,7 @@ resource "aws_lambda_function" "ec2" {
   environment {
     variables = {
       TABLE_NAME              = var.table_name
-      SNS_TOPIC_ARN           = var.sns_topic_arn
+      SNS_TOPIC_ARN           = aws_sns_topic.notifications.arn
       SES_SENDER              = var.ses_sender
       CPU_THRESHOLD_PERCENT   = var.cpu_threshold_percent
       NETWORK_THRESHOLD_BYTES = var.network_threshold_bytes
@@ -168,7 +168,7 @@ resource "aws_lambda_function" "lb" {
   environment {
     variables = {
       TABLE_NAME                 = var.table_name
-      SNS_TOPIC_ARN              = var.sns_topic_arn
+      SNS_TOPIC_ARN              = aws_sns_topic.notifications.arn
       SES_SENDER                 = var.ses_sender
       LB_REQUEST_COUNT_THRESHOLD = var.lb_request_count_threshold
     }
@@ -189,7 +189,7 @@ resource "aws_lambda_function" "nat_gw" {
   environment {
     variables = {
       TABLE_NAME                  = var.table_name
-      SNS_TOPIC_ARN               = var.sns_topic_arn
+      SNS_TOPIC_ARN               = aws_sns_topic.notifications.arn
       SES_SENDER                  = var.ses_sender
       NAT_GW_CONNECTION_THRESHOLD = var.nat_gw_connection_threshold
     }
@@ -218,4 +218,28 @@ resource "aws_dynamodb_table" "stale_resources" {
     name = "Type"
     type = "S"
   }
+}
+
+# ---------------------------------------------------------------------
+# SNS — ops/FinOps summary topic. Name matches the original hardcoded
+# topic ("stale-resource-info") from before this was configurable,
+# prefixed for uniqueness/tagging.
+# ---------------------------------------------------------------------
+resource "aws_sns_topic" "notifications" {
+  name = "${var.project_name}-stale-resource-info"
+}
+
+resource "aws_sns_topic_subscription" "ops_email" {
+  topic_arn = aws_sns_topic.notifications.arn
+  protocol  = "email"
+  endpoint  = var.ops_notification_email
+}
+
+# ---------------------------------------------------------------------
+# SES — registers var.ses_sender as a verified identity. AWS emails
+# that address a verification link; it won't actually be usable to send
+# from until someone clicks it. Terraform can't do that step for you.
+# ---------------------------------------------------------------------
+resource "aws_ses_email_identity" "sender" {
+  email = var.ses_sender
 }
