@@ -1,9 +1,8 @@
-import os
 import sys
 import json
 import logging
 from datetime import datetime, timedelta
-from schema import import_schema
+from schema import config, import_schema
 import boto3
 from botocore.exceptions import ClientError
 
@@ -26,40 +25,13 @@ spacer = "_" * 100
 TIME_FRAME = 7                  
 # Metric period (seconds) — derived from TIME_FRAME
 PERIOD = 86400 * TIME_FRAME
-default_region = 'AWS_REGION, ap-southeast-1'
+default_region = config.AWS_REGION
 
 # ---------------------------------------------------------------------
 # DynamoDB SETUP
 # ---------------------------------------------------------------------
 dynamodb = boto3.client('dynamodb', region_name=default_region)
-table_name = 'StaleResourcesTesting' 
-
-key_schema = [
-    {'AttributeName': 'ResourceID', 'KeyType': 'HASH'},
-    {'AttributeName': 'Type', 'KeyType': 'RANGE'}
-]
-attribute_definitions = [
-    {'AttributeName': 'ResourceID', 'AttributeType': 'S'},
-    {'AttributeName': 'Type', 'AttributeType': 'S'}
-]
-provisioned_throughput = {
-    'ReadCapacityUnits': 5,   
-    'WriteCapacityUnits': 5  
-}
-
-# Create table if missing
-try:
-    dynamodb.create_table(
-        TableName=table_name,
-        KeySchema=key_schema,
-        AttributeDefinitions=attribute_definitions,
-        ProvisionedThroughput=provisioned_throughput
-    )
-except ClientError as e:
-    if e.response['Error']['Code'] == 'ResourceInUseException':
-        logger.info(f"Table {table_name} already exists.")
-    else:
-        raise
+table_name = config.TABLE_NAME
 
 
 # ---------------------------------------------------------------------
@@ -219,7 +191,7 @@ def main_handler(event, context):
                             request_count = response['MetricDataResults'][1]['Values'][0]
 
                           
-                            if request_count > 1000:
+                            if request_count > config.LB_REQUEST_COUNT_THRESHOLD:
                                 status = "Not stale"
                                 logger.info(
                                     f"Name: {lb_name}, Owner: {creator}, Region: {region}, Age: {lb_age}, Requests: {request_count}")
@@ -266,7 +238,7 @@ def main_handler(event, context):
         )
     try:
         sns_client.publish(
-            TopicArn='arn:stale-resource-info',
+            TopicArn=config.SNS_TOPIC_ARN,
             Message=BODY_TEXT,
             Subject='Info',
         )
@@ -305,10 +277,10 @@ def main_handler(event, context):
                     BODY_TEXT += (
                         f"\n--> {resource[4]} load balancer named {resource[0]}, Owner: {creator}  Region: {resource[2]}"
                         f" has been identified as {resource[3]} resource"
-                        f"\nPlease {instruction} or it will be automatically deleted"
+                        f"\nPlease {instruction}"
                     )
 
-                SENDER = "sender@gmail.com"
+                SENDER = config.SES_SENDER
                 RECIPIENT = creator
                 SUBJECT = "Stale resource identified"
                 CHARSET = "UTF-8"

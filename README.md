@@ -120,7 +120,7 @@ Metrics tracked for each resource type, with statistics and units:
 
 3. **Create DynamoDB Table**
    ```bash
-   aws dynamodb create-table --table-name StaleResourcesTesting ...
+   aws dynamodb create-table --table-name stale-resources ...
    ```
 
 4. **Setup Notifications**
