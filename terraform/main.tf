@@ -368,6 +368,10 @@ resource "aws_dynamodb_table" "stale_resources" {
   hash_key     = "ResourceID"
   range_key    = "Type"
 
+  point_in_time_recovery {
+    enabled = true
+  }
+
   attribute {
     name = "ResourceID"
     type = "S"
@@ -385,7 +389,8 @@ resource "aws_dynamodb_table" "stale_resources" {
 # prefixed for uniqueness/tagging.
 # ---------------------------------------------------------------------
 resource "aws_sns_topic" "notifications" {
-  name = "${var.project_name}-stale-resource-info"
+  name              = "${var.project_name}-stale-resource-info"
+  kms_master_key_id = "alias/aws/sns"
 }
 
 resource "aws_sns_topic_subscription" "ops_email" {

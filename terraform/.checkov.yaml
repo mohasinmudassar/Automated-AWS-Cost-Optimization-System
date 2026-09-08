@@ -1,0 +1,12 @@
+# Checks skipped deliberately, not because they're wrong in general —
+# each is disproportionate for this project's scale and threat model.
+# Re-evaluate if that ever changes (e.g., if these functions start
+# handling anything sensitive, or run in a shared/multi-tenant account).
+skip-check:
+  - CKV_AWS_50   # X-Ray tracing: these are scheduled scans, not user-facing request paths — nothing to trace latency through.
+  - CKV_AWS_117  # Lambda in a VPC: these functions only call public AWS APIs (EC2/CloudWatch/SNS/SES/DynamoDB/CloudTrail); VPC placement would need a NAT Gateway or VPC endpoints purely for cost, no security gain.
+  - CKV_AWS_116  # Dead-letter queue: triggered on a fixed EventBridge schedule, not business-critical async events; failures are already visible in CloudWatch Logs.
+  - CKV_AWS_173  # Lambda env var KMS CMK: no secrets in the environment (table name, thresholds, a sender address, a topic ARN) — AWS-managed encryption at rest already applies by default.
+  - CKV_AWS_272  # Lambda code signing: enterprise supply-chain control, disproportionate at this scale.
+  - CKV_AWS_115  # Reserved concurrency: no risk of runaway concurrency from a scheduled trigger with no user-facing traffic.
+  - CKV_AWS_119  # DynamoDB CMK encryption: no secrets stored in this table (resource IDs, owner tags, timestamps) — AWS-owned encryption at rest already applies by default.
