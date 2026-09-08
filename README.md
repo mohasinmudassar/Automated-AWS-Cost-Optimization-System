@@ -108,29 +108,21 @@ Metrics tracked for each resource type, with statistics and units:
 
 ---
 
-## 🪜 Deployment Guide
+## 🪜 Deployment
 
-1. **Create Lambda Layers**
-   - `layers/packages` → `boto3`, etc.
-   - `layers/schema` → Metric definitions.
+Everything above — the Lambdas, layer, DynamoDB table, SNS/SES, and the
+scan schedule — is provisioned by Terraform, in `terraform/`.
 
-2. **Deploy Auditor Lambdas**
-   - EC2, LB, and NAT GW functions.
-   - Configure IAM roles and policies.
-
-3. **Create DynamoDB Table**
+1. Create the Terraform state bucket once, outside this config
+   (versioned, encrypted — see `terraform/backend.tf`).
+2. Copy `terraform/backend.hcl.example` → `backend.hcl` and
+   `terraform/terraform.tfvars.example` → `terraform.tfvars`, filling in
+   your own values.
+3. From `terraform/`:
    ```bash
-   aws dynamodb create-table --table-name stale-resources ...
+   terraform init -backend-config=backend.hcl
+   terraform apply
    ```
-
-4. **Setup Notifications**
-   - Verify SES sender email.
-   - Create and subscribe to SNS topic.
-
-5. **Configure EventBridge**
-
-6. **Set Environment Variables**
-   - Configure region, table, thresholds, topic ARN.
 
 ---
 

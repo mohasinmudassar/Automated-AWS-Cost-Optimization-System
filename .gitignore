@@ -29,3 +29,6 @@ backend.hcl
 # Editors
 .vscode/
 .idea/
+
+# Working notes / journal — never intended to ship
+.scratch/
