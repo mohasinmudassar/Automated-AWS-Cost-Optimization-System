@@ -67,3 +67,17 @@ variable "deletion_delay_minutes" {
   type        = number
   default     = 10050
 }
+
+# --- Scan scheduling ---
+
+variable "scan_schedule_expression" {
+  description = "EventBridge schedule expression the three scans run on."
+  type        = string
+  default     = "rate(1 day)"
+}
+
+variable "time_frame_days" {
+  description = "Lookback window, in days, used to decide whether a resource is idle. Passed to the EC2 scan via its event payload; lb.py and nat_gw.py hardcode the same default (7) themselves."
+  type        = number
+  default     = 7
+}

@@ -9,9 +9,16 @@ provider "aws" {
 }
 
 # ---------------------------------------------------------------------
-# IAM — baseline role per function (CloudWatch Logs only).
-# 3.8 adds each function's scoped permissions (DynamoDB, SES, SNS,
-# CloudWatch, CloudTrail, the relevant Describe* calls) on top of this.
+# IAM — one role per function, each with a single inline policy scoped
+# to exactly the API calls that function's code makes (verified against
+# functions/{ec2,lb,nat_gw}/*.py, not copied from the old blanket
+# policy). ec2:Describe*, elasticloadbalancing:Describe*,
+# cloudwatch:GetMetricData, and cloudtrail:LookupEvents don't support
+# resource-level scoping in IAM, so those stay on "*" — DynamoDB, SNS,
+# and SES are scoped to the specific resources this config creates.
+# No events:* or lambda:InvokeFunction/AddPermission/GetFunction here —
+# those were only ever needed by the deletion-scheduling code 2.6
+# removed.
 # ---------------------------------------------------------------------
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
@@ -25,15 +32,54 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
-data "aws_iam_policy_document" "lambda_logs" {
+data "aws_iam_policy_document" "ec2_lambda" {
   statement {
-    effect = "Allow"
-    actions = [
-      "logs:CreateLogGroup",
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
-    ]
+    sid       = "Logs"
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    sid       = "DescribeEC2"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeRegions", "ec2:DescribeInstances", "ec2:DescribeTags"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:GetMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "LookUpCreator"
+    effect    = "Allow"
+    actions   = ["cloudtrail:LookupEvents"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "RecordFindings"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
+    resources = [aws_dynamodb_table.stale_resources.arn]
+  }
+
+  statement {
+    sid       = "PublishSummary"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.notifications.arn]
+  }
+
+  statement {
+    sid       = "NotifyOwner"
+    effect    = "Allow"
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = [aws_ses_email_identity.sender.arn]
   }
 }
 
@@ -42,10 +88,72 @@ resource "aws_iam_role" "ec2_lambda" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
-resource "aws_iam_role_policy" "ec2_lambda_logs" {
-  name   = "${var.project_name}-ec2-lambda-logs"
+resource "aws_iam_role_policy" "ec2_lambda" {
+  name   = "${var.project_name}-ec2-lambda"
   role   = aws_iam_role.ec2_lambda.id
-  policy = data.aws_iam_policy_document.lambda_logs.json
+  policy = data.aws_iam_policy_document.ec2_lambda.json
+}
+
+data "aws_iam_policy_document" "lb_lambda" {
+  statement {
+    sid       = "Logs"
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    sid       = "DescribeRegions"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeRegions"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "DescribeLoadBalancers"
+    effect = "Allow"
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeTags",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:GetMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "LookUpCreator"
+    effect    = "Allow"
+    actions   = ["cloudtrail:LookupEvents"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "RecordFindings"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
+    resources = [aws_dynamodb_table.stale_resources.arn]
+  }
+
+  statement {
+    sid       = "PublishSummary"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.notifications.arn]
+  }
+
+  statement {
+    sid       = "NotifyOwner"
+    effect    = "Allow"
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = [aws_ses_email_identity.sender.arn]
+  }
 }
 
 resource "aws_iam_role" "lb_lambda" {
@@ -53,10 +161,61 @@ resource "aws_iam_role" "lb_lambda" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
-resource "aws_iam_role_policy" "lb_lambda_logs" {
-  name   = "${var.project_name}-lb-lambda-logs"
+resource "aws_iam_role_policy" "lb_lambda" {
+  name   = "${var.project_name}-lb-lambda"
   role   = aws_iam_role.lb_lambda.id
-  policy = data.aws_iam_policy_document.lambda_logs.json
+  policy = data.aws_iam_policy_document.lb_lambda.json
+}
+
+data "aws_iam_policy_document" "nat_gw_lambda" {
+  statement {
+    sid       = "Logs"
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    sid       = "DescribeEC2"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeRegions", "ec2:DescribeNatGateways", "ec2:DescribeTags"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:GetMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "LookUpCreator"
+    effect    = "Allow"
+    actions   = ["cloudtrail:LookupEvents"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "RecordFindings"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
+    resources = [aws_dynamodb_table.stale_resources.arn]
+  }
+
+  statement {
+    sid       = "PublishSummary"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.notifications.arn]
+  }
+
+  statement {
+    sid       = "NotifyOwner"
+    effect    = "Allow"
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = [aws_ses_email_identity.sender.arn]
+  }
 }
 
 resource "aws_iam_role" "nat_gw_lambda" {
@@ -64,10 +223,10 @@ resource "aws_iam_role" "nat_gw_lambda" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
-resource "aws_iam_role_policy" "nat_gw_lambda_logs" {
-  name   = "${var.project_name}-nat-gw-lambda-logs"
+resource "aws_iam_role_policy" "nat_gw_lambda" {
+  name   = "${var.project_name}-nat-gw-lambda"
   role   = aws_iam_role.nat_gw_lambda.id
-  policy = data.aws_iam_policy_document.lambda_logs.json
+  policy = data.aws_iam_policy_document.nat_gw_lambda.json
 }
 
 # ---------------------------------------------------------------------
@@ -242,4 +401,67 @@ resource "aws_sns_topic_subscription" "ops_email" {
 # ---------------------------------------------------------------------
 resource "aws_ses_email_identity" "sender" {
   email = var.ses_sender
+}
+
+# ---------------------------------------------------------------------
+# EventBridge — scan schedule only. There is no deletion schedule: 2.6
+# removed the EC2 handler's deletion-scheduling code entirely, and
+# remediation becomes PR-based in Phase 5, not EventBridge-triggered.
+# One rule, three targets — each target's static `input` matches
+# exactly what that handler's main_handler(event, context) reads.
+# ---------------------------------------------------------------------
+resource "aws_cloudwatch_event_rule" "scan_schedule" {
+  name                = "${var.project_name}-scan-schedule"
+  schedule_expression = var.scan_schedule_expression
+}
+
+resource "aws_cloudwatch_event_target" "ec2_scan" {
+  rule = aws_cloudwatch_event_rule.scan_schedule.name
+  arn  = aws_lambda_function.ec2.arn
+  input = jsonencode({
+    major      = "EC2"
+    minor      = "instance"
+    time_frame = var.time_frame_days
+  })
+}
+
+resource "aws_lambda_permission" "ec2_scan" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.ec2.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scan_schedule.arn
+}
+
+resource "aws_cloudwatch_event_target" "lb_scan" {
+  rule = aws_cloudwatch_event_rule.scan_schedule.name
+  arn  = aws_lambda_function.lb.arn
+  input = jsonencode({
+    major = "LB"
+  })
+}
+
+resource "aws_lambda_permission" "lb_scan" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lb.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scan_schedule.arn
+}
+
+resource "aws_cloudwatch_event_target" "nat_gw_scan" {
+  rule = aws_cloudwatch_event_rule.scan_schedule.name
+  arn  = aws_lambda_function.nat_gw.arn
+  input = jsonencode({
+    major = "GW"
+    minor = "nat_gw"
+  })
+}
+
+resource "aws_lambda_permission" "nat_gw_scan" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.nat_gw.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scan_schedule.arn
 }
