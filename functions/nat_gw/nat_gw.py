@@ -119,9 +119,10 @@ def main_handler(event, context):
     1. Iterate over all AWS regions.
     2. For each region, list all NAT Gateways.
     3. Determine the creator (via tag or CloudTrail).
-    4. Check CloudWatch metrics to find stale gateways.
-    5. Log and store stale resources in DynamoDB.
-    6. Notify owners via SES and summary via SNS.
+    4. Skip NAT Gateways explicitly tagged stale=false.
+    5. Check CloudWatch metrics to find stale gateways.
+    6. Log and store stale resources in DynamoDB.
+    7. Notify owners via SES and summary via SNS.
     """
     email_candidates = {}
     info_candidates = []
@@ -175,7 +176,17 @@ def main_handler(event, context):
                 email_candidates.setdefault(creator, [])
 
             # -----------------------------------------------------------------
-            # Step 3: Identify stale NAT Gateways based on metrics
+            # Step 3: Skip NAT Gateways explicitly marked as non-stale
+            # -----------------------------------------------------------------
+            stale_tag_present = any(
+                tag['Key'] == 'stale' and tag['Value'] == 'false' for tag in nat_gateway_tags['Tags'])
+            if stale_tag_present:
+                info_candidates.append((nat_gateway_id, nat_gateway_age, region, creator,
+                                        "Resource tagged as not stale by owner", "None"))
+                continue
+
+            # -----------------------------------------------------------------
+            # Step 4: Identify stale NAT Gateways based on metrics
             # -----------------------------------------------------------------
             if nat_gateway_age_days >= TIME_FRAME:
                 end_time = datetime.now()
@@ -213,7 +224,7 @@ def main_handler(event, context):
                                         f"Resource Age less than {TIME_FRAME} days", "None"))
 
     # -----------------------------------------------------------------
-    # Step 4: Publish summary report to SNS
+    # Step 5: Publish summary report to SNS
     # -----------------------------------------------------------------
     BODY_TEXT = ""
     sns_client = boto3.client('sns', region_name=default_region)
@@ -232,7 +243,7 @@ def main_handler(event, context):
         logger.exception('Could not publish message to the topic.')
 
     # -----------------------------------------------------------------
-    # Step 5: Store stale NAT Gateways and notify owners via SES
+    # Step 6: Store stale NAT Gateways and notify owners via SES
     # -----------------------------------------------------------------
     for creator, idle_resources in email_candidates.items():
         if creator:

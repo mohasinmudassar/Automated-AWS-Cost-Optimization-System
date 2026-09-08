@@ -62,6 +62,9 @@ variable "nat_gw_connection_threshold" {
   default     = 7
 }
 
+# Intentionally unused until Phase 5 wires PR-based remediation through
+# it; kept here now rather than deleted-and-recreated later.
+# tflint-ignore: terraform_unused_declarations
 variable "deletion_delay_minutes" {
   description = "Grace period, in minutes, before a flagged resource is eligible for remediation (~7 days). Not yet wired to any function — reserved for Phase 5."
   type        = number

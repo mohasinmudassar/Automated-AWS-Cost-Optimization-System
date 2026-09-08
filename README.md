@@ -1,5 +1,7 @@
 # 🧭 Automated AWS Cost Optimization System (EC2 / LB / NAT Gateway)
 
+[![CI](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml/badge.svg)](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml)
+
 > A governance workflow for idle AWS resources, not another idle-resource detector.
 
 ---
@@ -105,6 +107,15 @@ Metrics tracked for each resource type, with statistics and units:
 
 ### 5️⃣ **Auto-Deletion (Optional)**
 - EventBridge schedules cleanup after `N` minutes.
+
+---
+
+## ✅ Tests
+
+Each detector has three cases: an idle resource that's flagged, a busy
+one that isn't, and one explicitly excluded via a `stale=false` tag —
+that last case matters most, since a cleanup tool that flags something
+still in active use is the failure that erodes trust fastest.
 
 ---
 

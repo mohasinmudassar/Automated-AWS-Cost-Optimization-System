@@ -109,9 +109,10 @@ def main_handler(event, context):
     1) Enumerate all AWS regions
     2) Fetch all Load Balancers in each region
     3) Determine creator (tag or CloudTrail)
-    4) Check CloudWatch metrics for activity in last TIME_FRAME days
-    5) Classify as 'stale' or 'active'
-    6) Store stale results in DynamoDB and send notifications via SNS + SES
+    4) Skip LBs explicitly tagged stale=false
+    5) Check CloudWatch metrics for activity in last TIME_FRAME days
+    6) Classify as 'stale' or 'active'
+    7) Store stale results in DynamoDB and send notifications via SNS + SES
     """
     email_candidates = {}   # Holds creators → list of their stale LBs
     info_candidates = []    # For SNS summary
@@ -175,7 +176,17 @@ def main_handler(event, context):
                         email_candidates[creator] = []
 
                 # -----------------------------------------------------------------
-                # Step 5: Evaluate LB activity if older than TIME_FRAME
+                # Step 5: Skip LBs explicitly marked as non-stale
+                # -----------------------------------------------------------------
+                stale_tag_present = any(
+                    tag['Key'] == 'stale' and tag['Value'] == 'false' for tag in tag_dicts)
+                if stale_tag_present:
+                    info_candidates.append((lb_name, lb_type, lb_age, region, creator,
+                                           listeners, "Resource tagged as not stale by owner", "None"))
+                    continue
+
+                # -----------------------------------------------------------------
+                # Step 6: Evaluate LB activity if older than TIME_FRAME
                 # -----------------------------------------------------------------
                 if lb_age_days >= TIME_FRAME:
                     if listeners:
@@ -185,10 +196,10 @@ def main_handler(event, context):
                             cloudwatch_client, resource_type_major, lb_type, lb_resource_id, start_time, end_time)
 
           
-                        request_count_list = response['MetricDataResults'][1]['Values']
+                        request_count_list = response['MetricDataResults'][0]['Values']
 
                         if request_count_list:
-                            request_count = response['MetricDataResults'][1]['Values'][0]
+                            request_count = response['MetricDataResults'][0]['Values'][0]
 
                           
                             if request_count > config.LB_REQUEST_COUNT_THRESHOLD:
@@ -224,7 +235,7 @@ def main_handler(event, context):
                                            listeners, f"Resource Age less than {TIME_FRAME} days", "None"))
 
     # -----------------------------------------------------------------
-    # Step 6: Publish overall results to SNS
+    # Step 7: Publish overall results to SNS
     # -----------------------------------------------------------------
     BODY_TEXT = ""
     sns_client = boto3.client('sns', region_name=default_region)
@@ -246,7 +257,7 @@ def main_handler(event, context):
         logger.exception('Could not publish message to the topic.')
 
     # -----------------------------------------------------------------
-    # Step 7: Store stale results to DynamoDB and send SES emails
+    # Step 8: Store stale results to DynamoDB and send SES emails
     # -----------------------------------------------------------------
     for creator, idle_resources in email_candidates.items():
         if creator is not None:
