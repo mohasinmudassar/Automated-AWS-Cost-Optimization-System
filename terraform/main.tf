@@ -195,3 +195,27 @@ resource "aws_lambda_function" "nat_gw" {
     }
   }
 }
+
+# ---------------------------------------------------------------------
+# DynamoDB — stale resource records. Hash/range key matches what all
+# three handlers already write via put_item (ResourceID + Type), the
+# same schema the Lambda-side create_table code used before 2.5 removed
+# it. On-demand billing since scan volume is small and bursty, not a
+# steady load worth provisioning capacity for.
+# ---------------------------------------------------------------------
+resource "aws_dynamodb_table" "stale_resources" {
+  name         = var.table_name
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "ResourceID"
+  range_key    = "Type"
+
+  attribute {
+    name = "ResourceID"
+    type = "S"
+  }
+
+  attribute {
+    name = "Type"
+    type = "S"
+  }
+}
