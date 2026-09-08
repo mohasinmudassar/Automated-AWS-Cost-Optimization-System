@@ -332,7 +332,7 @@ def main_handler(event, context):
                       f"\n{spacer}")
     try:
         sns_client.publish(
-            TopicArn='arn:aws:sns:ap-southeast-1:000000000000:stale-resource-info',
+            TopicArn=os.environ["SNS_TOPIC_ARN"],
             Message=BODY_TEXT,
             Subject='Info',
         )

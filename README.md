@@ -1,19 +1,32 @@
 # 🧭 Automated AWS Cost Optimization System (EC2 / LB / NAT Gateway)
 
-> Automated detection, tracking, and cleanup of idle AWS resources.  
-> Designed for cost optimization, visibility, and operational efficiency.
+> A governance workflow for idle AWS resources, not another idle-resource detector.
 
 ---
 
 ## 🧩 Overview
 
-The **AWS Idle Resource Auditor** scans for idle or underutilized AWS resources across all regions including **EC2 instances**, **Load Balancers**, and **NAT Gateways**.  
+Detecting idle resources is a solved problem. AWS Compute Optimizer has
+shipped idle-resource detection natively since November 2024, and most
+cost tools do some version of "flag anything with low CPU." That part is
+commodity — this project isn't trying to out-detect it.
 
-It identifies idle assets using **CloudWatch metrics**, determines ownership using **tags or CloudTrail**, and automatically:
-- Stores findings in **DynamoDB**
-- Notifies owners via **SES**
-- Publishes summaries to **SNS**
-- Optionally schedules **auto-deletion** using **EventBridge + Lambda**
+What detection alone doesn't do is close the loop: figure out **who**
+owns a flagged resource, **tell them directly**, give them a **grace
+period** to justify or reclaim it, and only then turn the finding into a
+**reviewable change** instead of a silent deletion. That loop — not the
+detection step — is what this system is built around, applied
+consistently across **EC2 instances**, **Load Balancers**, and **NAT
+Gateways**:
+
+- Resolves ownership from resource tags, falling back to **CloudTrail**
+  when no tag is present
+- Notifies the owner directly via **SES**
+- Records every finding in **DynamoDB** so nothing is only ever an email
+- Publishes a summary to **SNS** for the ops/FinOps team
+- Applies a grace period before any remediation is taken, using
+  **CloudWatch metrics** to decide what's actually idle in the first
+  place
 
 ---
 
@@ -47,7 +60,6 @@ Below is the system’s AWS architecture showing how the components interact end
 | **SNS** | Sends summaries to Ops / FinOps team. |
 | **SES** | Notifies resource owners directly. |
 | **EventBridge** | Schedules auto-deletion events. |
-| **Deletion Lambda** | Cleans up stale resources automatically. |
 | **Lambda Layers** | Provide shared schema + dependency packages. |
 
 ---
@@ -93,15 +105,14 @@ Metrics tracked for each resource type, with statistics and units:
 
 ### 5️⃣ **Auto-Deletion (Optional)**
 - EventBridge schedules cleanup after `N` minutes.
-- Deletion Lambda removes resources not tagged as `stale=false`.
 
 ---
 
 ## 🪜 Deployment Guide
 
 1. **Create Lambda Layers**
-   - `/lambdas/layers/packages` → `boto3`, etc.
-   - `/lambdas/layers/schema` → Metric definitions.
+   - `layers/packages` → `boto3`, etc.
+   - `layers/schema` → Metric definitions.
 
 2. **Deploy Auditor Lambdas**
    - EC2, LB, and NAT GW functions.
@@ -117,7 +128,6 @@ Metrics tracked for each resource type, with statistics and units:
    - Create and subscribe to SNS topic.
 
 5. **Configure EventBridge**
-   - Triggers deletion Lambda after 7 days.
 
 6. **Set Environment Variables**
    - Configure region, table, thresholds, topic ARN.
