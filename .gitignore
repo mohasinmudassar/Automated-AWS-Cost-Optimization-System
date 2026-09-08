@@ -15,9 +15,10 @@ env/
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
 *.tfvars
 !terraform.tfvars.example
+backend.hcl
+!backend.hcl.example
 
 # Packaged Lambda artifacts
 *.zip
@@ -28,3 +29,6 @@ env/
 # Editors
 .vscode/
 .idea/
+
+# Working notes / journal — never intended to ship
+.scratch/

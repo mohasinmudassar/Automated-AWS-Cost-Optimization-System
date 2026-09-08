@@ -1,0 +1,31 @@
+# Copy this file to terraform.tfvars and fill in your own values.
+# terraform.tfvars is gitignored (see .gitignore); this example file is not.
+#
+# project_name, table_name, ses_sender, and ops_notification_email have no
+# default in variables.tf and must be set. Everything else below already has
+# a sensible default — shown here so every variable is visible in one place,
+# not because you're required to override it.
+
+project_name = "idlewatch"
+
+aws_region = "ap-southeast-1"
+
+lambda_timeout     = 300
+lambda_memory_size = 256
+
+# --- Values consumed by layers/schema/config.py (functions/*) ---
+
+table_name             = "stale-resources"
+ses_sender             = "ops@example.com"
+ops_notification_email = "ops@example.com"
+
+cpu_threshold_percent       = 10
+network_threshold_bytes     = 5 * 1024 * 1024 # 5 MB
+lb_request_count_threshold  = 1000
+nat_gw_connection_threshold = 7
+deletion_delay_minutes      = 10050 # ~7 days; not wired to any function yet
+
+# --- Scan scheduling ---
+
+scan_schedule_expression = "rate(1 day)"
+time_frame_days          = 7

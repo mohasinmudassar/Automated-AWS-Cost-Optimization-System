@@ -174,7 +174,7 @@ def main_handler(event, context):
                 # -----------------------------------------------------------------
                 # ❗ Hardcoded tag key/value
                 stale_tag_present = any(
-                    tag['Key'] == 'stale' and tag['Value'] == 'false' for tag in ec2_tags)
+                    tag['Key'] == 'stale' and tag['Value'] == 'false' for tag in ec2_tags['Tags'])
                 if stale_tag_present:
                     info_candidates.append((instance_id, instance_age, region, creator,
                                             "Resource tagged as not stale by owner",

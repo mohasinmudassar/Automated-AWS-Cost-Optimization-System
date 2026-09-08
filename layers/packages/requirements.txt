@@ -1,1 +1,3 @@
-boto3==1.28.36
+# Intentionally empty. boto3 ships with the Lambda runtime already, so it
+# doesn't belong here. Add a dependency here only when a handler actually
+# needs a third-party package the runtime doesn't already provide.
