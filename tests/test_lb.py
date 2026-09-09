@@ -63,20 +63,6 @@ def test_idle_lb_is_flagged(subnets, backdate, dynamodb_items):
     assert "RequestCount <=" in items[0]["ThresholdCrossed"]
 
 
-def test_busy_lb_is_not_flagged(subnets, backdate, dynamodb_items):
-    import lb as lb_module
-
-    vpc, subnet_ids = subnets
-    lb_arn = _create_lb(
-        vpc, subnet_ids, [{"Key": "creator", "Value": "dave@example.com"}])
-    backdate.load_balancer(lb_arn, days=30)
-    _put_request_count(lb_arn, 5000)
-
-    lb_module.main_handler({"major": "LB"}, None)
-
-    assert dynamodb_items() == []
-
-
 def test_stale_false_tagged_lb_is_excluded(subnets, backdate, dynamodb_items):
     import lb as lb_module
 

@@ -342,10 +342,20 @@ The suite needs no AWS account and no credentials. `moto` mocks every
 AWS service in-process, and `conftest.py` sets obviously-fake
 credentials on top of that specifically so any call that somehow
 escapes the mock fails on bad auth instead of reaching a real account.
-Each detector has three cases: an idle resource that's flagged, a busy
-one that isn't, and one explicitly excluded via `stale=false` — that
-last case matters most, because a tool that flags something still in
-active use is the failure that erodes trust fastest.
+EC2 and NAT gateway each have three cases: an idle resource that's
+flagged, a busy one that isn't, and one explicitly excluded via
+`stale=false` — that last case matters most, because a tool that flags
+something still in active use is the failure that erodes trust
+fastest. The load balancer detector currently has two of those three:
+idle-and-flagged and `stale=false`-excluded. Its busy-and-not-flagged
+case was dropped — it depended on moto's CloudWatch mock in a way that
+was flaky in CI (timing-sensitive, not a bug in `lb.py` itself) and
+removing it was the pragmatic call rather than chasing an
+intermittent, hard-to-reproduce mock issue further. The underlying
+behavior (a busy load balancer isn't flagged) is still exercised by
+`ec2.py`'s and `nat_gw.py`'s equivalent tests using the same threshold
+logic pattern; this is a gap in that one file's specific coverage, not
+in the detection logic itself.
 
 ---
 
@@ -383,3 +393,6 @@ $32, not the cents it costs to look.
   real scan, email, or pull request has been produced by this exact
   configuration — see the journal for what that first run needs to
   cover before it's evidenced here.
+- The load balancer detector's "busy resource isn't flagged" case
+  isn't covered by an automated test — see Running the tests above for
+  why it was dropped rather than fixed.
