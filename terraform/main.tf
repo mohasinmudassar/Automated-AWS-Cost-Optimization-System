@@ -8,18 +8,6 @@ provider "aws" {
   }
 }
 
-# ---------------------------------------------------------------------
-# IAM — one role per function, each with a single inline policy scoped
-# to exactly the API calls that function's code makes (verified against
-# functions/{ec2,lb,nat_gw}/*.py, not copied from the old blanket
-# policy). ec2:Describe*, elasticloadbalancing:Describe*,
-# cloudwatch:GetMetricData, and cloudtrail:LookupEvents don't support
-# resource-level scoping in IAM, so those stay on "*" — DynamoDB, SNS,
-# and SES are scoped to the specific resources this config creates.
-# No events:* or lambda:InvokeFunction/AddPermission/GetFunction here —
-# those were only ever needed by the deletion-scheduling code 2.6
-# removed.
-# ---------------------------------------------------------------------
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
     effect  = "Allow"
@@ -229,9 +217,54 @@ resource "aws_iam_role_policy" "nat_gw_lambda" {
   policy = data.aws_iam_policy_document.nat_gw_lambda.json
 }
 
-# ---------------------------------------------------------------------
-# Lambda deployment packages — one zip per handler directory.
-# ---------------------------------------------------------------------
+data "aws_iam_policy_document" "remediation_lambda" {
+  statement {
+    sid       = "Logs"
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    sid       = "ReadAndMarkFindings"
+    effect    = "Allow"
+    actions   = ["dynamodb:Scan", "dynamodb:UpdateItem"]
+    resources = [aws_dynamodb_table.stale_resources.arn]
+  }
+
+  statement {
+    sid       = "RecheckCurrentTagsBeforeActing"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeTags", "elasticloadbalancing:DescribeTags"]
+    resources = ["*"]
+  }
+
+  dynamic "statement" {
+    for_each = var.remediation_mode == "delete" ? [1] : []
+    content {
+      sid    = "DeleteResources"
+      effect = "Allow"
+      actions = [
+        "ec2:TerminateInstances",
+        "ec2:DeleteNatGateway",
+        "elasticloadbalancing:DeleteLoadBalancer",
+      ]
+      resources = ["*"]
+    }
+  }
+}
+
+resource "aws_iam_role" "remediation_lambda" {
+  name               = "${var.project_name}-remediation-lambda"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+resource "aws_iam_role_policy" "remediation_lambda" {
+  name   = "${var.project_name}-remediation-lambda"
+  role   = aws_iam_role.remediation_lambda.id
+  policy = data.aws_iam_policy_document.remediation_lambda.json
+}
+
 data "archive_file" "ec2" {
   type        = "zip"
   source_dir  = "${path.module}/../functions/ec2"
@@ -250,14 +283,6 @@ data "archive_file" "nat_gw" {
   output_path = "${path.module}/build/nat_gw.zip"
 }
 
-# ---------------------------------------------------------------------
-# Lambda layer — layers/schema, published so all three functions can
-# `from schema import config, import_schema`. Layer content has to live
-# under python/ for the Lambda Python runtime to find it, and "schema"
-# has to be an importable package, so each file is placed explicitly at
-# python/schema/<file> rather than zipping layers/schema/ as-is (which
-# would put the files at the zip root instead of nested under schema/).
-# ---------------------------------------------------------------------
 data "archive_file" "schema_layer" {
   type        = "zip"
   output_path = "${path.module}/build/schema-layer.zip"
@@ -285,12 +310,33 @@ resource "aws_lambda_layer_version" "schema" {
   compatible_runtimes = ["python3.13"]
 }
 
-# ---------------------------------------------------------------------
-# Lambda functions. AWS_REGION is deliberately not set in environment
-# variables — it's a reserved Lambda environment variable AWS populates
-# automatically from the function's deployed region, and config.py
-# already falls back to it.
-# ---------------------------------------------------------------------
+resource "terraform_data" "remediation_build" {
+  triggers_replace = [
+    filesha256("${path.module}/../functions/remediation/requirements.txt"),
+    filesha256("${path.module}/../functions/remediation/remediation.py"),
+    filesha256("${path.module}/../functions/remediation/config.py"),
+    filesha256("${path.module}/../functions/remediation/pricing.py"),
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      rm -rf ${path.module}/build/remediation_pkg
+      mkdir -p ${path.module}/build/remediation_pkg
+      pip3 install --quiet -r ${path.module}/../functions/remediation/requirements.txt -t ${path.module}/build/remediation_pkg
+      cp ${path.module}/../functions/remediation/*.py ${path.module}/build/remediation_pkg/
+    EOT
+  }
+}
+
+data "archive_file" "remediation" {
+  type        = "zip"
+  source_dir  = "${path.module}/build/remediation_pkg"
+  output_path = "${path.module}/build/remediation.zip"
+
+  depends_on = [terraform_data.remediation_build]
+}
+
 resource "aws_lambda_function" "ec2" {
   function_name    = "${var.project_name}-ec2-auditor"
   filename         = data.archive_file.ec2.output_path
@@ -355,13 +401,33 @@ resource "aws_lambda_function" "nat_gw" {
   }
 }
 
-# ---------------------------------------------------------------------
-# DynamoDB — stale resource records. Hash/range key matches what all
-# three handlers already write via put_item (ResourceID + Type), the
-# same schema the Lambda-side create_table code used before 2.5 removed
-# it. On-demand billing since scan volume is small and bursty, not a
-# steady load worth provisioning capacity for.
-# ---------------------------------------------------------------------
+resource "aws_lambda_function" "remediation" {
+  function_name    = "${var.project_name}-remediation"
+  filename         = data.archive_file.remediation.output_path
+  source_code_hash = data.archive_file.remediation.output_base64sha256
+  handler          = "remediation.main_handler"
+  runtime          = "python3.13"
+  role             = aws_iam_role.remediation_lambda.arn
+  timeout          = var.lambda_timeout
+  memory_size      = var.lambda_memory_size
+
+  environment {
+    variables = merge(
+      {
+        TABLE_NAME             = var.table_name
+        DELETION_DELAY_MINUTES = var.deletion_delay_minutes
+        REMEDIATION_MODE       = var.remediation_mode
+      },
+      var.remediation_mode == "pr" ? {
+        GITHUB_TOKEN  = var.github_token
+        TARGET_REPO   = var.target_repo
+        BRANCH_PREFIX = var.branch_prefix
+        BASE_BRANCH   = var.base_branch
+      } : {}
+    )
+  }
+}
+
 resource "aws_dynamodb_table" "stale_resources" {
   name         = var.table_name
   billing_mode = "PAY_PER_REQUEST"
@@ -383,11 +449,6 @@ resource "aws_dynamodb_table" "stale_resources" {
   }
 }
 
-# ---------------------------------------------------------------------
-# SNS — ops/FinOps summary topic. Name matches the original hardcoded
-# topic ("stale-resource-info") from before this was configurable,
-# prefixed for uniqueness/tagging.
-# ---------------------------------------------------------------------
 resource "aws_sns_topic" "notifications" {
   name              = "${var.project_name}-stale-resource-info"
   kms_master_key_id = "alias/aws/sns"
@@ -399,22 +460,10 @@ resource "aws_sns_topic_subscription" "ops_email" {
   endpoint  = var.ops_notification_email
 }
 
-# ---------------------------------------------------------------------
-# SES — registers var.ses_sender as a verified identity. AWS emails
-# that address a verification link; it won't actually be usable to send
-# from until someone clicks it. Terraform can't do that step for you.
-# ---------------------------------------------------------------------
 resource "aws_ses_email_identity" "sender" {
   email = var.ses_sender
 }
 
-# ---------------------------------------------------------------------
-# EventBridge — scan schedule only. There is no deletion schedule: 2.6
-# removed the EC2 handler's deletion-scheduling code entirely, and
-# remediation becomes PR-based in Phase 5, not EventBridge-triggered.
-# One rule, three targets — each target's static `input` matches
-# exactly what that handler's main_handler(event, context) reads.
-# ---------------------------------------------------------------------
 resource "aws_cloudwatch_event_rule" "scan_schedule" {
   name                = "${var.project_name}-scan-schedule"
   schedule_expression = var.scan_schedule_expression
@@ -467,6 +516,19 @@ resource "aws_lambda_permission" "nat_gw_scan" {
   statement_id  = "AllowEventBridgeInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.nat_gw.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scan_schedule.arn
+}
+
+resource "aws_cloudwatch_event_target" "remediation_scan" {
+  rule = aws_cloudwatch_event_rule.scan_schedule.name
+  arn  = aws_lambda_function.remediation.arn
+}
+
+resource "aws_lambda_permission" "remediation_scan" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.remediation.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.scan_schedule.arn
 }

@@ -34,8 +34,10 @@ def _put_connection_count(nat_gateway_id, value):
 def test_idle_nat_gateway_is_flagged(subnet, backdate, dynamodb_items):
     import nat_gw as nat_gw_module
 
-    nat_gateway_id = _create_nat_gateway(
-        subnet, [{"Key": "creator", "Value": "carol@example.com"}])
+    nat_gateway_id = _create_nat_gateway(subnet, [
+        {"Key": "creator", "Value": "carol@example.com"},
+        {"Key": "Name", "Value": "nat-1"},
+    ])
     backdate.nat_gateway(nat_gateway_id, days=30)
     _put_connection_count(nat_gateway_id, 1)
 
@@ -45,6 +47,9 @@ def test_idle_nat_gateway_is_flagged(subnet, backdate, dynamodb_items):
     assert len(items) == 1
     assert items[0]["ResourceID"] == nat_gateway_id
     assert items[0]["Creator"] == "carol@example.com"
+    assert items[0]["Tags"] == {"creator": "carol@example.com", "Name": "nat-1"}
+    assert "ConnectionAttemptCount 1" in items[0]["Metrics"]
+    assert "ConnectionAttemptCount <=" in items[0]["ThresholdCrossed"]
 
 
 def test_busy_nat_gateway_is_not_flagged(subnet, backdate, dynamodb_items):
@@ -68,8 +73,6 @@ def test_stale_false_tagged_nat_gateway_is_excluded(subnet, backdate, dynamodb_i
         {"Key": "stale", "Value": "false"},
     ])
     backdate.nat_gateway(nat_gateway_id, days=30)
-    # Deliberately no connection-count metric put — same reasoning as
-    # the other two detectors' exclusion tests.
 
     nat_gw_module.main_handler({"major": "GW", "minor": "nat_gw"}, None)
 

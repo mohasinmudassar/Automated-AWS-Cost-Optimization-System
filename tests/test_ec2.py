@@ -35,8 +35,10 @@ def _put_metric(instance_id, metric_name, value, unit):
 def test_idle_instance_is_flagged(subnet, backdate, dynamodb_items):
     import ec2 as ec2_module
 
-    instance_id = _create_instance(
-        subnet, [{"Key": "creator", "Value": "alice@example.com"}])
+    instance_id = _create_instance(subnet, [
+        {"Key": "creator", "Value": "alice@example.com"},
+        {"Key": "Name", "Value": "web-1"},
+    ])
     backdate.ec2_instance(instance_id, days=30)
     _put_metric(instance_id, "CPUUtilization", 2.0, "Percent")
     _put_metric(instance_id, "NetworkIn", 1024, "Bytes")
@@ -47,6 +49,10 @@ def test_idle_instance_is_flagged(subnet, backdate, dynamodb_items):
 
     items = dynamodb_items()
     assert len(items) == 1
+    assert items[0]["Tags"] == {"creator": "alice@example.com", "Name": "web-1"}
+    assert "CPUUtilization 2.0%" in items[0]["Metrics"]
+    assert "CPU <" in items[0]["ThresholdCrossed"]
+    assert items[0]["InstanceType"] == "t3.micro"
     assert items[0]["ResourceID"] == instance_id
     assert items[0]["Creator"] == "alice@example.com"
 
@@ -75,9 +81,6 @@ def test_stale_false_tagged_instance_is_excluded(subnet, backdate, dynamodb_item
         {"Key": "stale", "Value": "false"},
     ])
     backdate.ec2_instance(instance_id, days=30)
-    # Deliberately no metric data put — if the exclusion tag were
-    # ignored, the "no data returned" branch would still flag this as
-    # stale, so an empty result here proves the tag check runs first.
 
     ec2_module.main_handler(
         {"major": "EC2", "minor": "instance", "time_frame": 7}, None)

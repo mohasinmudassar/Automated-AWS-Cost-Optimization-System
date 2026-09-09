@@ -21,8 +21,6 @@ variable "lambda_memory_size" {
   default     = 256
 }
 
-# --- Values consumed by layers/schema/config.py (functions/*) ---
-
 variable "table_name" {
   description = "DynamoDB table stale resources are recorded in."
   type        = string
@@ -62,19 +60,14 @@ variable "nat_gw_connection_threshold" {
   default     = 7
 }
 
-# Intentionally unused until Phase 5 wires PR-based remediation through
-# it; kept here now rather than deleted-and-recreated later.
-# tflint-ignore: terraform_unused_declarations
 variable "deletion_delay_minutes" {
-  description = "Grace period, in minutes, before a flagged resource is eligible for remediation (~7 days). Not yet wired to any function — reserved for Phase 5."
+  description = "Grace period, in minutes, before a flagged resource is eligible for remediation (~7 days). Read by the remediation Lambda to decide which findings are due."
   type        = number
   default     = 10050
 }
 
-# --- Scan scheduling ---
-
 variable "scan_schedule_expression" {
-  description = "EventBridge schedule expression the three scans run on."
+  description = "EventBridge schedule expression the three scans (and remediation) run on."
   type        = string
   default     = "rate(1 day)"
 }
@@ -83,4 +76,39 @@ variable "time_frame_days" {
   description = "Lookback window, in days, used to decide whether a resource is idle. Passed to the EC2 scan via its event payload; lb.py and nat_gw.py hardcode the same default (7) themselves."
   type        = number
   default     = 7
+}
+
+variable "remediation_mode" {
+  description = "\"pr\" (default) opens a pull request against target_repo proposing removal/resize. \"delete\" calls AWS directly to terminate/delete the resource instead — a separate, explicit opt-in; Terraform only grants the remediation Lambda's role delete permissions when this is actually set to \"delete\"."
+  type        = string
+  default     = "pr"
+  validation {
+    condition     = contains(["pr", "delete"], var.remediation_mode)
+    error_message = "remediation_mode must be \"pr\" or \"delete\"."
+  }
+}
+
+variable "github_token" {
+  description = "GitHub token with write access on target_repo. Only used (and only required) when remediation_mode = \"pr\". Never given a real default — set via terraform.tfvars (gitignored) or your CI secret store, never committed."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "target_repo" {
+  description = "\"owner/repo\" of the Terraform repo remediation PRs are opened against. Only required when remediation_mode = \"pr\"."
+  type        = string
+  default     = null
+}
+
+variable "branch_prefix" {
+  description = "Prefix for the branch remediation creates for each PR."
+  type        = string
+  default     = "auto-remediation"
+}
+
+variable "base_branch" {
+  description = "Branch in target_repo that remediation branches from and opens PRs against."
+  type        = string
+  default     = "main"
 }

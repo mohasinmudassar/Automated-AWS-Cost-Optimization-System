@@ -31,9 +31,6 @@ def _create_lb(vpc, subnet_ids, tags):
 
 
 def _put_request_count(lb_arn, value):
-    # AWS/ApplicationELB dimensions use the ARN suffix after "loadbalancer/",
-    # e.g. "app/test-lb/1234567890abcdef" — matches lb.py's own
-    # lb_resource_id = LoadBalancerArn.split("/", maxsplit=1)[1].
     dimension_value = lb_arn.split(":loadbalancer/")[1]
     cw = boto3.client("cloudwatch", region_name="us-east-1")
     cw.put_metric_data(Namespace="AWS/ApplicationELB", MetricData=[{
@@ -49,8 +46,10 @@ def test_idle_lb_is_flagged(subnets, backdate, dynamodb_items):
     import lb as lb_module
 
     vpc, subnet_ids = subnets
-    lb_arn = _create_lb(
-        vpc, subnet_ids, [{"Key": "creator", "Value": "bob@example.com"}])
+    lb_arn = _create_lb(vpc, subnet_ids, [
+        {"Key": "creator", "Value": "bob@example.com"},
+        {"Key": "Name", "Value": "lb-1"},
+    ])
     backdate.load_balancer(lb_arn, days=30)
     _put_request_count(lb_arn, 5)
 
@@ -59,6 +58,9 @@ def test_idle_lb_is_flagged(subnets, backdate, dynamodb_items):
     items = dynamodb_items()
     assert len(items) == 1
     assert items[0]["Creator"] == "bob@example.com"
+    assert items[0]["Tags"] == {"creator": "bob@example.com", "Name": "lb-1"}
+    assert "RequestCount 5" in items[0]["Metrics"]
+    assert "RequestCount <=" in items[0]["ThresholdCrossed"]
 
 
 def test_busy_lb_is_not_flagged(subnets, backdate, dynamodb_items):
@@ -84,9 +86,6 @@ def test_stale_false_tagged_lb_is_excluded(subnets, backdate, dynamodb_items):
         {"Key": "stale", "Value": "false"},
     ])
     backdate.load_balancer(lb_arn, days=30)
-    # Deliberately no RequestCount metric put — proves the exclusion
-    # happens before any metric evaluation, not just "no data => not
-    # flagged" by coincidence (this handler treats no data as stale).
 
     lb_module.main_handler({"major": "LB"}, None)
 

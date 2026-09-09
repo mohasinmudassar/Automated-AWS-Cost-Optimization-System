@@ -6,10 +6,6 @@ from schema import config, import_schema
 import boto3
 from botocore.exceptions import ClientError
 
-# ---------------------------------------------------------------------
-# LOGGING CONFIGURATION
-# ---------------------------------------------------------------------
-# Ensures that all log messages are shown in CloudWatch with timestamp and level.
 logger = logging.getLogger()
 if len(logging.getLogger().handlers) > 0:
     logger.setLevel(logging.INFO)
@@ -18,39 +14,27 @@ else:
                         format='%(asctime)s: %(levelname)s: %(message)s')
 
 
-# ---------------------------------------------------------------------
-# GLOBAL CONFIGURATION
-# ---------------------------------------------------------------------
 spacer = "_" * 100
 
 
 TIME_FRAME = 7
-PERIOD = 86400 * TIME_FRAME  # Convert days to seconds
+PERIOD = 86400 * TIME_FRAME
 
 
 default_region = config.AWS_REGION
 
 
-# ---------------------------------------------------------------------
-# DYNAMODB SETUP
-# ---------------------------------------------------------------------
-# Connect to DynamoDB
 dynamodb = boto3.client('dynamodb', region_name=default_region)
 
 table_name = config.TABLE_NAME
 
 
-# ---------------------------------------------------------------------
-# FUNCTION: get_creator_from_cloudtrail_ec2
-# ---------------------------------------------------------------------
-# Finds the creator of a NAT Gateway by scanning CloudTrail events.
 def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id):
     cloudtrail_client = boto3.client('cloudtrail', region_name=region)
 
     start_time = resource_creation_time
     end_time = datetime.now()
 
-    # Look up creation events for the given NAT Gateway ID
     response = cloudtrail_client.lookup_events(
         LookupAttributes=[
             {'AttributeKey': 'ResourceName', 'AttributeValue': resource_id},
@@ -71,16 +55,11 @@ def get_creator_from_cloudtrail_ec2(resource_creation_time, region, resource_id)
     return None
 
 
-# ---------------------------------------------------------------------
-# FUNCTION: get_metrics
-# ---------------------------------------------------------------------
-# Fetches NAT Gateway CloudWatch metrics such as connection attempts.
 def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, gw_resource_id, start_time, end_time):
     details = import_schema.get_data(resource_type_major)[
         'Metrics'][resource_type_minor]
     metric_data_queries = []
 
-    # Build CloudWatch metric queries based on schema definitions
     for key, _ in details.items():
         query = {
             "Id": details[key]['Metric_ID'],
@@ -110,30 +89,13 @@ def get_metrics(cloudwatch_client, resource_type_major, resource_type_minor, gw_
     return response
 
 
-# ---------------------------------------------------------------------
-# MAIN HANDLER (Lambda entry point)
-# ---------------------------------------------------------------------
 def main_handler(event, context):
-    """
-    Main workflow:
-    1. Iterate over all AWS regions.
-    2. For each region, list all NAT Gateways.
-    3. Determine the creator (via tag or CloudTrail).
-    4. Skip NAT Gateways explicitly tagged stale=false.
-    5. Check CloudWatch metrics to find stale gateways.
-    6. Log and store stale resources in DynamoDB.
-    7. Notify owners via SES and summary via SNS.
-    """
     email_candidates = {}
     info_candidates = []
 
-    # Extract parameters from event payload
     resource_type_major = event['major']
     resource_type_minor = event['minor']
 
-    # -----------------------------------------------------------------
-    # Step 1: Retrieve all AWS regions
-    # -----------------------------------------------------------------
     ec2_client = boto3.client('ec2', region_name=default_region)
     regions = [region['RegionName']
                for region in ec2_client.describe_regions()['Regions']]
@@ -142,23 +104,19 @@ def main_handler(event, context):
         cloudwatch_client = boto3.client("cloudwatch", region_name=region)
         ec2 = boto3.client('ec2', region_name=region)
 
-        # -----------------------------------------------------------------
-        # Step 2: Fetch all NAT Gateways in the region
-        # -----------------------------------------------------------------
         response = ec2.describe_nat_gateways()
 
         for nat_gateway in response['NatGateways']:
             nat_gateway_id = nat_gateway['NatGatewayId']
             nat_gateway_creation_time = nat_gateway['CreateTime']
 
-            # Calculate age of the NAT Gateway
             nat_gateway_age = datetime.now(
                 nat_gateway_creation_time.tzinfo) - nat_gateway_creation_time
             nat_gateway_age_days = nat_gateway_age.days
 
-            # Retrieve tags to identify owner
             nat_gateway_tags = ec2.describe_tags(
                 Filters=[{'Name': 'resource-id', 'Values': [nat_gateway_id]}])
+            tags_dict = {t['Key']: t['Value'] for t in nat_gateway_tags['Tags']}
             creator = None
             status = None
 
@@ -167,7 +125,6 @@ def main_handler(event, context):
                     creator = tag['Value']
                     break
 
-            # Store or look up creator if not found
             if creator:
                 email_candidates.setdefault(creator, [])
             else:
@@ -175,9 +132,6 @@ def main_handler(event, context):
                     nat_gateway_creation_time, region, nat_gateway_id)
                 email_candidates.setdefault(creator, [])
 
-            # -----------------------------------------------------------------
-            # Step 3: Skip NAT Gateways explicitly marked as non-stale
-            # -----------------------------------------------------------------
             stale_tag_present = any(
                 tag['Key'] == 'stale' and tag['Value'] == 'false' for tag in nat_gateway_tags['Tags'])
             if stale_tag_present:
@@ -185,9 +139,6 @@ def main_handler(event, context):
                                         "Resource tagged as not stale by owner", "None"))
                 continue
 
-            # -----------------------------------------------------------------
-            # Step 4: Identify stale NAT Gateways based on metrics
-            # -----------------------------------------------------------------
             if nat_gateway_age_days >= TIME_FRAME:
                 end_time = datetime.now()
                 start_time = end_time - timedelta(days=TIME_FRAME)
@@ -197,35 +148,48 @@ def main_handler(event, context):
                 if response['MetricDataResults'][0]['Values']:
                     connection_attempts = response['MetricDataResults'][0]['Values'][0]
 
+                    threshold_text = (
+                        f"ConnectionAttemptCount <= {config.NAT_GW_CONNECTION_THRESHOLD} "
+                        f"over {TIME_FRAME} days")
+
                     if connection_attempts > config.NAT_GW_CONNECTION_THRESHOLD:
                         status = "Not stale"
                         logger.info(
                             f"NAT Gateway: {nat_gateway_id}, Region: {region}, Owner: {creator}, Connection Attempt Count: {connection_attempts}")
                     else:
                         status = "stale"
-                        email_candidates[creator].append(
-                            (nat_gateway_id, region, resource_type_major))
+                        email_candidates[creator].append({
+                            "resource_id": nat_gateway_id,
+                            "region": region,
+                            "resource_type": resource_type_major,
+                            "tags": tags_dict,
+                            "metrics": f"ConnectionAttemptCount {connection_attempts} over the last {TIME_FRAME} days",
+                            "threshold_crossed": threshold_text,
+                        })
                         logger.info(
                             f"Stale NAT Gateway detected: {nat_gateway_id}, Region: {region}, Owner: {creator}, Connection Attempt Count: {connection_attempts}")
 
                     info_candidates.append(
                         (nat_gateway_id, nat_gateway_age, region, creator, connection_attempts, status))
                 else:
-                    # No metric data indicates idle gateway
-                    email_candidates[creator].append(
-                        (nat_gateway_id, region, resource_type_major))
+                    email_candidates[creator].append({
+                        "resource_id": nat_gateway_id,
+                        "region": region,
+                        "resource_type": resource_type_major,
+                        "tags": tags_dict,
+                        "metrics": f"No CloudWatch data returned over the last {TIME_FRAME} days",
+                        "threshold_crossed": (
+                            f"ConnectionAttemptCount <= {config.NAT_GW_CONNECTION_THRESHOLD} "
+                            f"over {TIME_FRAME} days"),
+                    })
                     logger.info(
                         f"Stale NAT Gateway detected: {nat_gateway_id}, Region: {region}, Owner: {creator}, Connection Attempt Count: No Values Returned")
                     info_candidates.append(
                         (nat_gateway_id, nat_gateway_age, region, creator, "No Values Returned", "stale"))
             else:
-                # Skip NAT Gateways newer than the time frame
                 info_candidates.append((nat_gateway_id, nat_gateway_age, region, creator,
                                         f"Resource Age less than {TIME_FRAME} days", "None"))
 
-    # -----------------------------------------------------------------
-    # Step 5: Publish summary report to SNS
-    # -----------------------------------------------------------------
     BODY_TEXT = ""
     sns_client = boto3.client('sns', region_name=default_region)
     for resource in info_candidates:
@@ -242,33 +206,32 @@ def main_handler(event, context):
     except ClientError:
         logger.exception('Could not publish message to the topic.')
 
-    # -----------------------------------------------------------------
-    # Step 6: Store stale NAT Gateways and notify owners via SES
-    # -----------------------------------------------------------------
     for creator, idle_resources in email_candidates.items():
         if creator:
             BODY_TEXT = ""
             for resource in idle_resources:
                 try:
-                    # Insert stale NAT Gateway record into DynamoDB
                     dynamodb.put_item(
                         TableName=table_name,
                         Item={
                             'Creator': {'S': creator},
-                            'ResourceID': {'S': resource[0]},
-                            'Type': {'S': resource[2]},
-                            'Region': {'S': resource[1]},
+                            'ResourceID': {'S': resource["resource_id"]},
+                            'Type': {'S': resource["resource_type"]},
+                            'Region': {'S': resource["region"]},
                             'Deletion_Status': {'S': "Marked"},
+                            'Identification_Time': {'S': datetime.utcnow().strftime("%d-%m-%Y, %H:%M:%S")},
+                            'Tags': {'M': {k: {'S': v} for k, v in resource["tags"].items()}},
+                            'Metrics': {'S': resource["metrics"]},
+                            'ThresholdCrossed': {'S': resource["threshold_crossed"]},
                         }
                     )
                     logger.info(
-                        f"Stored stale NAT Gateway {resource} in DynamoDB")
+                        f"Stored stale NAT Gateway {resource['resource_id']} in DynamoDB")
                 except ClientError as e:
                     logger.exception(
                         f"Error storing NAT Gateway in DynamoDB: {e}")
 
-                # Prepare email body for notification
-                BODY_TEXT += (f"\n--> NAT Gateway: {resource[0]}, Owner: {creator}, Region: {resource[1]}"
+                BODY_TEXT += (f"\n--> NAT Gateway: {resource['resource_id']}, Owner: {creator}, Region: {resource['region']}"
                               "\n has been identified as a stale resource."
                               "\n Please delete it if not needed.")
 
