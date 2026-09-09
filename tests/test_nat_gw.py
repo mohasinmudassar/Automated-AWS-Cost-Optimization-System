@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -25,7 +25,7 @@ def _put_connection_count(nat_gateway_id, value):
     cw.put_metric_data(Namespace="AWS/NATGateway", MetricData=[{
         "MetricName": "ActiveConnectionCount",
         "Dimensions": [{"Name": "NatGatewayId", "Value": nat_gateway_id}],
-        "Timestamp": datetime.now(timezone.utc),
+        "Timestamp": datetime.now(timezone.utc) - timedelta(minutes=2),
         "Value": value,
         "Unit": "Count",
     }])

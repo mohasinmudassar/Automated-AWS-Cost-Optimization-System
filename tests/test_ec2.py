@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -26,7 +26,7 @@ def _put_metric(instance_id, metric_name, value, unit):
     cw.put_metric_data(Namespace="AWS/EC2", MetricData=[{
         "MetricName": metric_name,
         "Dimensions": [{"Name": "InstanceId", "Value": instance_id}],
-        "Timestamp": datetime.now(timezone.utc),
+        "Timestamp": datetime.now(timezone.utc) - timedelta(minutes=2),
         "Value": value,
         "Unit": unit,
     }])

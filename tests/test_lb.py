@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -36,7 +36,7 @@ def _put_request_count(lb_arn, value):
     cw.put_metric_data(Namespace="AWS/ApplicationELB", MetricData=[{
         "MetricName": "RequestCount",
         "Dimensions": [{"Name": "LoadBalancer", "Value": dimension_value}],
-        "Timestamp": datetime.now(timezone.utc),
+        "Timestamp": datetime.now(timezone.utc) - timedelta(minutes=2),
         "Value": value,
         "Unit": "Count",
     }])
