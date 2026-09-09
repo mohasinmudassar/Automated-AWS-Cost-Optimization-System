@@ -1,7 +1,5 @@
 # Automated AWS Cost Optimization System
 
-[![CI](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml/badge.svg)](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml)
-
 > A governance workflow for idle AWS resources, not another idle-resource detector.
 
 AWS Compute Optimizer has flagged idle compute natively since November
