@@ -2,9 +2,16 @@
 # terraform.tfvars is gitignored (see .gitignore); this example file is not.
 #
 # project_name, table_name, ses_sender, and ops_notification_email have no
-# default in variables.tf and must be set. Everything else below already has
-# a sensible default — shown here so every variable is visible in one place,
-# not because you're required to override it.
+# default in variables.tf and must be set. github_token and target_repo have
+# no default either, but are only actually required when remediation_mode
+# is left at its default of "pr" — see the note below. Everything else
+# already has a sensible default — shown here so every variable is visible
+# in one place, not because you're required to override it.
+#
+# NEVER put a real GitHub token in this file (or in terraform.tfvars, if
+# you're tempted to commit it — don't; it's gitignored for exactly this
+# reason). Set github_token via TF_VAR_github_token in your shell/CI secret
+# store instead of writing it into any file at all.
 
 project_name = "idlewatch"
 
@@ -13,19 +20,21 @@ aws_region = "ap-southeast-1"
 lambda_timeout     = 300
 lambda_memory_size = 256
 
-# --- Values consumed by layers/schema/config.py (functions/*) ---
-
 table_name             = "stale-resources"
 ses_sender             = "ops@example.com"
 ops_notification_email = "ops@example.com"
 
 cpu_threshold_percent       = 10
-network_threshold_bytes     = 5 * 1024 * 1024 # 5 MB
+network_threshold_bytes     = 5 * 1024 * 1024
 lb_request_count_threshold  = 1000
 nat_gw_connection_threshold = 7
-deletion_delay_minutes      = 10050 # ~7 days; not wired to any function yet
-
-# --- Scan scheduling ---
+deletion_delay_minutes      = 10050
 
 scan_schedule_expression = "rate(1 day)"
 time_frame_days          = 7
+
+remediation_mode = "pr"
+
+target_repo   = "your-org/your-terraform-repo"
+branch_prefix = "auto-remediation"
+base_branch   = "main"

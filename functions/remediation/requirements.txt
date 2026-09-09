@@ -1,0 +1,4 @@
+# boto3 deliberately not listed — it ships with the Lambda runtime,
+# same reasoning as layers/packages/requirements.txt. Only requests
+# actually needs to be bundled into this function's deployment package.
+requests>=2.31

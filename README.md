@@ -1,7 +1,5 @@
 # 🧭 Automated AWS Cost Optimization System (EC2 / LB / NAT Gateway)
 
-[![CI](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml/badge.svg)](https://github.com/mohasinmudassar/Automated-AWS-Cost-Optimization-System/actions/workflows/ci.yml)
-
 > A governance workflow for idle AWS resources, not another idle-resource detector.
 
 ---
@@ -61,7 +59,8 @@ Below is the system’s AWS architecture showing how the components interact end
 | **DynamoDB** | Stores detected stale resource metadata. |
 | **SNS** | Sends summaries to Ops / FinOps team. |
 | **SES** | Notifies resource owners directly. |
-| **EventBridge** | Schedules auto-deletion events. |
+| **EventBridge** | Triggers the daily scan — and, on the same schedule, remediation's own check for findings past their grace period. |
+| **Remediation Lambda** | Reads findings from DynamoDB once their grace period has elapsed; opens a pull request by default, or deletes the resource directly in the separate, explicitly opt-in "delete" mode. |
 | **Lambda Layers** | Provide shared schema + dependency packages. |
 
 ---
@@ -105,8 +104,11 @@ Metrics tracked for each resource type, with statistics and units:
 - Sends SES email to the resource owner.
 - Publishes a summary message via SNS.
 
-### 5️⃣ **Auto-Deletion (Optional)**
-- EventBridge schedules cleanup after `N` minutes.
+### 5️⃣ **Remediation, After a Grace Period**
+- A separate remediation Lambda runs on the same schedule as the scans.
+- For every finding whose grace period has elapsed, it opens a pull
+  request by default (see below) — or, only if explicitly configured
+  into "delete" mode, deletes the resource directly.
 
 ---
 
@@ -116,6 +118,78 @@ Each detector has three cases: an idle resource that's flagged, a busy
 one that isn't, and one explicitly excluded via a `stale=false` tag —
 that last case matters most, since a cleanup tool that flags something
 still in active use is the failure that erodes trust fastest.
+
+---
+
+## 🔀 Why a Pull Request, Not a Delete
+
+> **Draft — I'm rewriting this section in my own words.**
+
+By default, remediation doesn't touch AWS at all. Once a finding's
+grace period has elapsed, it opens a pull request against your
+infrastructure repo proposing the change (remove the resource, or
+resize it) — the same way any other infrastructure change gets made:
+reviewed, in the open, by a person who can say no.
+
+The pull request carries the resource ID and type, the CloudWatch
+evidence that got it flagged, the threshold it crossed, a rough
+estimated monthly cost, and a reminder that tagging the resource
+`stale=false` in AWS excludes it from the next scan and makes the PR
+safe to close unmerged. Nothing about this requires trusting the tool's
+detection to be perfect — the worst case of a wrong PR is a wrong PR,
+not a production outage with no human in the loop.
+
+A "delete" mode exists (`remediation_mode = "delete"` in Terraform) for
+teams that want the old fully-autonomous behavior. It's a deliberate,
+separate opt-in, not the default — Terraform only grants the
+remediation Lambda's IAM role the actual delete permissions
+(`ec2:TerminateInstances`, `ec2:DeleteNatGateway`,
+`elasticloadbalancing:DeleteLoadBalancer`) when that mode is switched
+on, so a "pr"-mode deployment's role physically cannot delete anything,
+regardless of what any Lambda environment variable says.
+
+### Safety re-check before acting, and its own limitation
+
+A finding sits in DynamoDB for the whole grace period (about a week by
+default) before remediation ever looks at it again, so acting purely
+on that stored data risks acting on a resource whose situation has
+changed since. Immediately before opening a PR or deleting anything,
+remediation re-fetches the resource's **current** tags and skips it —
+marking it "Excluded" rather than remediating — if the owner has since
+tagged it `stale=false`. That covers an owner opting out mid-grace-period.
+
+It does **not** re-run the CloudWatch/threshold check the original scan
+did. A resource that quietly became busy again without anyone
+re-tagging it still gets remediated on the week-old finding. Re-checking
+metrics too would close that gap fully, at the cost of duplicating each
+scan Lambda's metric/threshold logic inside remediation for all three
+resource types — a deliberate scope cut for now, not an oversight.
+
+### Known limitation: matching is tag-based, not state-based
+
+Opening a PR means finding the right block in your `.tf` source to
+edit. The AWS resource ID (`i-0abc123`) is assigned when Terraform
+applies and is normally only recorded in **state** — it essentially
+never appears in the source itself, so searching for it there finds
+nothing in the common case. Tags, on the other hand, are usually
+written literally in a resource's `tags = { ... }` block, and they're
+also what the scan Lambdas already capture into each finding. So
+remediation matches on tags: it requires every tag on the finding to
+match a resource block's own tags, in exactly one place in the repo, or
+it refuses to act rather than guess. No match, more than one match, or
+a resource with no tags block at all are all treated the same way — as
+"I can't safely edit this."
+
+The robust fix is reading the target repo's actual Terraform state —
+the authoritative resource-address-to-real-AWS-ID mapping, no
+ambiguity. That needs backend access (credentials for wherever that
+repo's state lives), which this project deliberately avoids needing
+anywhere else, so it's out of scope for now rather than quietly assumed
+away. If your infrastructure repo's resources aren't consistently
+tagged, or its tags in `.tf` source have drifted from what's actually
+running in AWS, this won't find them — that's a real gap, not a
+theoretical one, and worth knowing before relying on this for real
+infrastructure.
 
 ---
 

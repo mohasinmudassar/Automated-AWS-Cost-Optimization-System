@@ -1,3 +1,5 @@
 pytest>=8.0
 boto3>=1.28
 moto[ec2,elbv2,cloudwatch,dynamodb,sns,ses,cloudtrail]>=5.0
+requests>=2.31
+responses>=0.25

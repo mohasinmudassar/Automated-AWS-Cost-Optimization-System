@@ -24,15 +24,22 @@ def _get_int(name: str, default: int) -> int:
 
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-
 TABLE_NAME = _require("TABLE_NAME")
 
-SNS_TOPIC_ARN = _require("SNS_TOPIC_ARN")
-SES_SENDER = _require("SES_SENDER")
-
-CPU_THRESHOLD_PERCENT = _get_int("CPU_THRESHOLD_PERCENT", 10)
-NETWORK_THRESHOLD_BYTES = _get_int("NETWORK_THRESHOLD_BYTES", 5 * 1024 * 1024)
-LB_REQUEST_COUNT_THRESHOLD = _get_int("LB_REQUEST_COUNT_THRESHOLD", 1000)
-NAT_GW_CONNECTION_THRESHOLD = _get_int("NAT_GW_CONNECTION_THRESHOLD", 7)
-
 DELETION_DELAY_MINUTES = _get_int("DELETION_DELAY_MINUTES", 10050)
+
+REMEDIATION_MODE = os.environ.get("REMEDIATION_MODE", "pr")
+if REMEDIATION_MODE not in ("pr", "delete"):
+    raise ConfigError(
+        f"REMEDIATION_MODE must be 'pr' or 'delete', got: {REMEDIATION_MODE!r}")
+
+if REMEDIATION_MODE == "pr":
+    GITHUB_TOKEN = _require("GITHUB_TOKEN")
+    TARGET_REPO = _require("TARGET_REPO")
+    BRANCH_PREFIX = os.environ.get("BRANCH_PREFIX", "auto-remediation")
+    BASE_BRANCH = os.environ.get("BASE_BRANCH", "main")
+else:
+    GITHUB_TOKEN = None
+    TARGET_REPO = None
+    BRANCH_PREFIX = None
+    BASE_BRANCH = None
