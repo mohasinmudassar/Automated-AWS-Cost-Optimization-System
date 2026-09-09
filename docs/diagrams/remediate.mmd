@@ -1,0 +1,29 @@
+flowchart LR
+    graceCheck{"Tagged stale=false<br/>since detection?"}
+    excluded["Excluded<br/>no further action"]
+    remediation["Remediation Lambda<br/><i>runs after the grace period</i>"]
+    mode{"Mode"}
+    pullRequest["Pull request<br/>evidence + est. monthly cost"]
+    merged["Engineer merges<br/>terraform apply removes it"]
+    deleted["Resource deleted"]
+
+    remediation --> graceCheck
+    graceCheck -->|"yes"| excluded
+    graceCheck -->|"no"| mode
+    mode -->|"pull request, matched by tags"| pullRequest
+    pullRequest --> merged
+    mode -->|"delete, opt-in"| deleted
+
+    classDef compute fill:#FFF4E5,stroke:#E08A00,stroke-width:1.5px,color:#3A2A00
+    classDef gate fill:#F2F3F1,stroke:#7A857E,stroke-width:1.5px,color:#1A211D
+    classDef external fill:#F0EBFA,stroke:#6E56C6,stroke-width:1.5px,color:#241A44
+    classDef human fill:#E4F2EC,stroke:#2C7A5E,stroke-width:1.5px,color:#0E2B21
+    classDef done fill:#EDEEEE,stroke:#9AA2A0,stroke-width:1.5px,color:#2A2F2D
+    class remediation compute
+    class graceCheck,mode gate
+    class pullRequest external
+    class merged human
+    class excluded,deleted done
+
+    click remediation "functions/remediation/" "Remediation Lambda"
+    click pullRequest "functions/remediation/" "Pull request builder"

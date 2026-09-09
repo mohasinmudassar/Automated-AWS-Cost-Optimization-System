@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph terraform["terraform/"]
+        direction TB
+        state["Remote state<br/>S3, native locking"]
+        config["main.tf · variables · locals"]
+    end
+
+    lambdas["4 × Lambda<br/>ec2 · lb · nat · remediation"]
+    layers["1 × Lambda layer"]
+    table[("Findings table<br/>on-demand")]
+    messaging["SNS topic · SES identity"]
+    schedules["1 × EventBridge rule<br/>4 targets"]
+    roles["4 × IAM role<br/>one policy each"]
+    ci["GitHub Actions"]
+
+    terraform --> lambdas
+    terraform --> layers
+    terraform --> table
+    terraform --> messaging
+    terraform --> schedules
+    terraform --> roles
+    ci -.->|"validate and test only<br/>no AWS credentials"| terraform
+
+    classDef compute fill:#FFF4E5,stroke:#E08A00,stroke-width:1.5px,color:#3A2A00
+    classDef store fill:#E8F1FC,stroke:#2F6FB5,stroke-width:1.5px,color:#10243A
+    classDef security fill:#FBECEC,stroke:#C0564A,stroke-width:1.5px,color:#3D1512
+    classDef external fill:#F0EBFA,stroke:#6E56C6,stroke-width:1.5px,color:#241A44
+    class lambdas,layers,schedules,messaging compute
+    class table,state store
+    class roles security
+    class ci external
+    class config store
+    style terraform fill:#FCFBF7,stroke:#D8D2C4,color:#4A4436
+
+    click ci ".github/workflows/ci.yml" "CI workflow"
+    click state "terraform/backend.tf" "Backend configuration"
