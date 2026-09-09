@@ -1,7 +1,7 @@
 import sys
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from schema import config, import_schema
 import boto3
 from botocore.exceptions import ClientError
@@ -133,7 +133,7 @@ def main_handler(event, context):
                     continue
 
                 if instance_age_days >= TIME_FRAME:
-                    end_time = datetime.now()
+                    end_time = datetime.now(timezone.utc) + timedelta(minutes=1)
                     start_time = end_time - timedelta(days=TIME_FRAME)
                     response = get_metrics(cloudwatch_client, resource_type_major, resource_type_minor,
                                            instance_id, start_time, end_time, PERIOD)
